@@ -196,7 +196,7 @@ def list_invite_codes():
     if not include_used:
         query += " WHERE ic.used_by IS NULL"
 
-    query += " ORDER BY ic.created_at DESC LIMIT %s"
+    query += "ORDER BY ic.created_at DESC LIMIT %s"
     params.append(limit)
 
     codes = execute_query(sql.SQL(query), tuple(params), fetch_all=True)
