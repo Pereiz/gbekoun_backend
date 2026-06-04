@@ -56,6 +56,7 @@ yarn-error.log*
 !gekoun_messages.js
 !init-mongo.js
 !gbekoundb.sql
+render_db
 
 # Uploads
 uploads/
@@ -80,6 +81,7 @@ htmlcov/
 # Docker
 .dockerignore
 docker-compose.override.yml
+docker-compose-dev.yml
 *.pid
 
 # Environment variables
