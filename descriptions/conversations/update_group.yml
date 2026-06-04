@@ -1,0 +1,33 @@
+Met à jour un groupe
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Nouveau nom du groupe
+        avatar_url:
+          type: string
+          description: Nouvelle URL d'avatar
+responses:
+  200:
+    description: Groupe mis à jour
+  401:
+    description: Non authentifié
+  403:
+    description: Non autorisé (admin requis)
+  404:
+    description: Conversation non trouvée

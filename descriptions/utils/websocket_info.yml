@@ -1,0 +1,24 @@
+Informations de connexion WebSocket
+---
+tags:
+  - Utilitaires
+responses:
+  200:
+    description: Configuration WebSocket
+    schema:
+      type: object
+      properties:
+        url:
+          type: string
+        protocols:
+          type: array
+        transports:
+          type: array
+        options:
+          type: object
+        events:
+          type: object
+        authentication:
+          type: object
+        example_connection:
+          type: string

@@ -1,0 +1,23 @@
+Résout un signalement
+---
+tags:
+  - Administration
+security:
+  - BearerAuth: []
+parameters:
+  - name: report_id
+    in: path
+    type: integer
+    required: true
+  - name: body
+    in: body
+    schema:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [ignored, warned, suspended, banned]
+          default: ignored
+responses:
+  200:
+    description: Signalement résolu

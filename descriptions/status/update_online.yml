@@ -1,0 +1,31 @@
+Met à jour son statut online
+---
+tags:
+  - Statut & Présence
+security:
+  - BearerAuth: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      properties:
+        is_online:
+          type: boolean
+          description: "True pour se connecter, False pour se déconnecter"
+          default: true
+responses:
+  200:
+    description: Statut mis à jour
+    schema:
+      type: object
+      properties:
+        message:
+          type: string
+        is_online:
+          type: boolean
+        last_seen:
+          type: string
+  401:
+    description: Non authentifié

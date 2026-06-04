@@ -1,0 +1,20 @@
+Messages où l'utilisateur est mentionné
+---
+tags:
+  - Messages
+security:
+  - BearerAuth: []
+parameters:
+  - name: limit
+    in: query
+    type: integer
+    description: Nombre de messages à récupérer
+    default: 50
+  - name: only_unread
+    in: query
+    type: boolean
+    description: Afficher uniquement les messages non lus
+    default: false
+responses:
+  200:
+    description: Liste des mentions

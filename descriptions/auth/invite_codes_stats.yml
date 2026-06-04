@@ -1,0 +1,39 @@
+Statistiques des codes d'invitation (Admin uniquement)
+---
+tags:
+  - Authentification
+  - Admin
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Statistiques des codes
+    schema:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Nombre total de codes générés
+          example: 50
+        used:
+          type: integer
+          description: Codes utilisés
+          example: 25
+        unused:
+          type: integer
+          description: Codes non utilisés
+          example: 15
+        expired:
+          type: integer
+          description: Codes expirés (non utilisés)
+          example: 10
+        used_percentage:
+          type: number
+          description: Pourcentage d'utilisation
+          example: 50.0
+        total_users:
+          type: integer
+          description: Nombre total d'utilisateurs inscrits
+          example: 25
+  403:
+    description: Non autorisé (admin requis)

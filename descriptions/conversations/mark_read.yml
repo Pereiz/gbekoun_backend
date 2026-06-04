@@ -1,0 +1,27 @@
+Marque tous les messages comme lus
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: body
+    in: body
+    schema:
+      type: object
+      properties:
+        message_id:
+          type: string
+          description: ID du dernier message lu
+responses:
+  200:
+    description: Messages marqués comme lus
+  401:
+    description: Non authentifié
+  404:
+    description: Conversation non trouvée

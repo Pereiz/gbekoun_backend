@@ -1,0 +1,18 @@
+Restaure un backup système
+---
+tags:
+  - Administration
+security:
+  - BearerAuth: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      properties:
+        backup_file:
+          type: string
+responses:
+  200:
+    description: Restauration initiée

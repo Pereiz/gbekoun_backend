@@ -1,0 +1,22 @@
+Statistiques messages (par jour, total)
+---
+tags:
+  - Administration
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Statistiques des messages
+    schema:
+      type: object
+      properties:
+        total:
+          type: integer
+        today:
+          type: integer
+        last_7_days:
+          type: integer
+        by_type:
+          type: object
+        daily:
+          type: array

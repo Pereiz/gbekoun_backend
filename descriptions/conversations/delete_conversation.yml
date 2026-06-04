@@ -1,0 +1,21 @@
+Supprime une conversation (soft delete)
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+responses:
+  200:
+    description: Conversation supprimée
+  401:
+    description: Non authentifié
+  403:
+    description: Non autorisé
+  404:
+    description: Conversation non trouvée

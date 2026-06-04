@@ -1,0 +1,26 @@
+Promouvoit un participant en admin
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: user_id
+    in: path
+    type: string
+    required: true
+    description: ID de l'utilisateur à promouvoir
+responses:
+  200:
+    description: Utilisateur promu admin
+  401:
+    description: Non authentifié
+  403:
+    description: Non autorisé (admin requis)
+  404:
+    description: Conversation non trouvée

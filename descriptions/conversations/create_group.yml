@@ -1,0 +1,40 @@
+Crée un groupe
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Nom du groupe
+          example: "Famille"
+        participants:
+          type: array
+          items:
+            type: string
+          description: Liste des numéros de téléphone des participants
+          example: ["+22990123456", "+22990789012"]
+        avatar_url:
+          type: string
+          description: URL de l'avatar du groupe
+responses:
+  201:
+    description: Groupe créé
+    schema:
+      type: object
+      properties:
+        id:
+          type: string
+  400:
+    description: Nom du groupe requis
+  401:
+    description: Non authentifié

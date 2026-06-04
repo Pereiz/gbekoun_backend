@@ -1,0 +1,26 @@
+Rétrograde un admin
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: user_id
+    in: path
+    type: string
+    required: true
+    description: ID de l'utilisateur à rétrograder
+responses:
+  200:
+    description: Admin rétrogradé
+  401:
+    description: Non authentifié
+  403:
+    description: Non autorisé (admin requis)
+  404:
+    description: Conversation non trouvée

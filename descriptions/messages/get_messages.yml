@@ -1,0 +1,47 @@
+Historique des messages (paginé)
+---
+tags:
+  - Messages
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: limit
+    in: query
+    type: integer
+    description: Nombre de messages à récupérer
+    default: 50
+  - name: before_id
+    in: query
+    type: string
+    description: ID du message précédent (pour pagination)
+responses:
+  200:
+    description: Liste des messages
+    schema:
+      type: array
+      items:
+        type: object
+        properties:
+          _id:
+            type: string
+          conversation_id:
+            type: string
+          sender_id:
+            type: string
+          type:
+            type: string
+          content:
+            type: string
+          timestamp:
+            type: string
+          read_by:
+            type: array
+          reactions:
+            type: array
+  403:
+    description: Non autorisé

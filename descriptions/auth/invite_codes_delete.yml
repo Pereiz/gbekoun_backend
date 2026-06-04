@@ -1,0 +1,35 @@
+Supprime un code d'invitation non utilisé (Admin uniquement)
+---
+tags:
+  - Authentification
+  - Admin
+security:
+  - BearerAuth: []
+parameters:
+  - name: code
+    in: path
+    type: string
+    required: true
+    description: Code à supprimer
+    example: "ABC123"
+responses:
+  200:
+    description: Code supprimé avec succès
+    schema:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "Code supprimé avec succès"
+  400:
+    description: Impossible de supprimer un code utilisé
+    schema:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Impossible de supprimer un code déjà utilisé"
+  403:
+    description: Non autorisé (admin requis)
+  404:
+    description: Code non trouvé

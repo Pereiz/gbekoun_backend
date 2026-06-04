@@ -1,0 +1,19 @@
+Désépingle la conversation
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+responses:
+  200:
+    description: Conversation désépinglée
+  401:
+    description: Non authentifié
+  404:
+    description: Conversation non trouvée

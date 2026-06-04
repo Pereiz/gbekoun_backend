@@ -1,0 +1,16 @@
+Récupère un utilisateur par numéro de téléphone
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+parameters:
+  - name: phone_number
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Détails de l'utilisateur
+  404:
+    description: Utilisateur non trouvé

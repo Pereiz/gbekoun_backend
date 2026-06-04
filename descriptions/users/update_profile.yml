@@ -1,0 +1,28 @@
+Met à jour son profil
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      properties:
+        display_name:
+          type: string
+        username:
+          type: string
+        bio:
+          type: string
+        avatar_url:
+          type: string
+responses:
+  200:
+    description: Profil mis à jour
+  400:
+    description: Données invalides
+  409:
+    description: Nom d'utilisateur déjà pris

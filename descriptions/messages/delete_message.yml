@@ -1,0 +1,29 @@
+Supprime un message
+---
+tags:
+  - Messages
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: message_id
+    in: path
+    type: string
+    required: true
+    description: ID du message
+  - name: for_everyone
+    in: query
+    type: boolean
+    description: Supprimer pour tout le monde (seulement l'auteur)
+    default: false
+responses:
+  200:
+    description: Message supprimé
+  403:
+    description: Non autorisé
+  404:
+    description: Message non trouvé

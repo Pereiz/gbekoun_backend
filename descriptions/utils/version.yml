@@ -1,0 +1,22 @@
+Version de l'API
+---
+tags:
+  - Utilitaires
+responses:
+  200:
+    description: Informations de version
+    schema:
+      type: object
+      properties:
+        version:
+          type: string
+        api_version:
+          type: string
+        build_date:
+          type: string
+        environment:
+          type: string
+        python_version:
+          type: string
+        flask_version:
+          type: string

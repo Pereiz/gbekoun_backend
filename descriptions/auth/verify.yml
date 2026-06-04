@@ -1,0 +1,32 @@
+Vérifie si le token JWT est valide
+---
+tags:
+  - Authentification
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Token valide
+    schema:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          example: true
+        user_id:
+          type: string
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        phone_number:
+          type: string
+          example: "+22990123456"
+        display_name:
+          type: string
+          example: "John Doe"
+  401:
+    description: Token invalide ou expiré
+    schema:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Token invalide ou expiré"

@@ -1,0 +1,23 @@
+Déconnexion (invalide la session côté serveur)
+---
+tags:
+  - Authentification
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Déconnexion réussie
+    schema:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "Déconnecté avec succès"
+  401:
+    description: Non authentifié
+    schema:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Token manquant"

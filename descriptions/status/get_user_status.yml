@@ -1,0 +1,33 @@
+Statut d'un utilisateur (online/last_seen)
+---
+tags:
+  - Statut & Présence
+security:
+  - BearerAuth: []
+parameters:
+  - name: user_id
+    in: path
+    type: string
+    required: true
+    description: ID de l'utilisateur
+responses:
+  200:
+    description: Statut de l'utilisateur
+    schema:
+      type: object
+      properties:
+        user_id:
+          type: string
+        is_online:
+          type: boolean
+        last_seen:
+          type: string
+          format: date-time
+          nullable: true
+        blocked_you:
+          type: boolean
+          description: "L'utilisateur vous a bloqué"
+  401:
+    description: Non authentifié
+  404:
+    description: Utilisateur non trouvé

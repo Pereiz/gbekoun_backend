@@ -1,0 +1,22 @@
+Configuration client (limites, features)
+---
+tags:
+  - Utilitaires
+responses:
+  200:
+    description: Configuration de l'application
+    schema:
+      type: object
+      properties:
+        app:
+          type: object
+        limits:
+          type: object
+        features:
+          type: object
+        media:
+          type: object
+        pagination:
+          type: object
+        websocket:
+          type: object

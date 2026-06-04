@@ -1,0 +1,26 @@
+Retire un participant du groupe
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: user_id
+    in: path
+    type: string
+    required: true
+    description: ID de l'utilisateur à retirer
+responses:
+  200:
+    description: Participant retiré
+  401:
+    description: Non authentifié
+  403:
+    description: Non autorisé (admin requis)
+  404:
+    description: Conversation non trouvée

@@ -1,0 +1,14 @@
+Supprime définitivement un compte
+---
+tags:
+  - Administration
+security:
+  - BearerAuth: []
+parameters:
+  - name: user_id
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Compte supprimé

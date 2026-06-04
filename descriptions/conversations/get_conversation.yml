@@ -1,0 +1,38 @@
+Détails d'une conversation (avec participants)
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+responses:
+  200:
+    description: Détails de la conversation
+    schema:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        name:
+          type: string
+        avatar_url:
+          type: string
+        created_at:
+          type: string
+        participants:
+          type: array
+          items:
+            type: object
+  401:
+    description: Non authentifié
+  403:
+    description: Non autorisé
+  404:
+    description: Conversation non trouvée

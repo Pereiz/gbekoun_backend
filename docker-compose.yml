@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  flask_app:
+    build: .  # Construit l'image à partir du Dockerfile
+    container_name: flask_chat_app
+    restart: always
+    ports:
+      - "8880:8880"  # Expose Flask sur le port 5000 de ta machine
+    environment:
+      # Variables d'environnement pour Flask
+      FLASK_ENV: development
+      FLASK_APP: app.py
+      FLASK_DEBUG: 1 
+      SECRET_KEY: dev-secret-key-docker
+      JWT_SECRET: jwt-secret-key-docker
+
+      # Connexions aux bases de données
+      # PostgreSQL
+      PG_HOST: postgresql
+      PG_PORT: 5432
+      PG_DATABASE: gbekoundb
+      PG_USER: gbekoundb_user
+      PG_PASSWORD: postgres_password_2024
+
+      # MongoDB
+      MONGO_URI: mongodb://admin:admin123@mongodb:27017/gbekoundb_messages?authSource=admin
+      MONGO_DB: gbekoundb_messages
+
+            # Upload folder
+      UPLOAD_FOLDER: /app/uploads
+
+    volumes:
+      # Pour le développement avec rechargement automatique
+      - .:/app
+      - uploads_data:/app/uploads
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - chat_network
+
+  postgresql:
+    image: postgres:15
+    container_name: postgres_chat
+    restart: always
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_DB: gbekoundb
+      POSTGRES_USER: gbekoundb_user
+      POSTGRES_PASSWORD: postgres_password_2024
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./setup_postgres_messaging.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - chat_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gbekoundb_user -d gbekoundb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:6.0
+    container_name: mongodb_chat
+    restart: always
+    ports:
+      - "27020:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_DATABASE: gbekoundb_messages
+    volumes:
+      - mongodb_data:/data/db
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - chat_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+volumes:
+  postgres_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  uploads_data:
+    driver: local
+
+networks:
+  chat_network:
+    driver: bridge

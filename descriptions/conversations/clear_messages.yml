@@ -1,0 +1,19 @@
+Efface tous les messages de la conversation pour moi
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+responses:
+  200:
+    description: Messages effacés
+  401:
+    description: Non authentifié
+  404:
+    description: Conversation non trouvée

@@ -1,0 +1,35 @@
+Envoie un message (fallback REST)
+---
+tags:
+  - Messages
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required:
+        - content
+      properties:
+        type:
+          type: string
+          enum: [text, image, video, audio, file]
+          default: text
+        content:
+          type: string
+          description: Contenu du message
+        reply_to_id:
+          type: string
+          description: ID du message auquel on répond
+responses:
+  201:
+    description: Message envoyé
+  403:
+    description: Non autorisé ou conversation en sourdine

@@ -1,0 +1,14 @@
+Débloque un utilisateur
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+parameters:
+  - name: user_id
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Utilisateur débloqué

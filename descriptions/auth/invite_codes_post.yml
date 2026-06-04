@@ -1,0 +1,49 @@
+Génère des codes d'invitation (Admin uniquement)
+---
+tags:
+  - Authentification
+  - Admin
+security:
+  - BearerAuth: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Nombre de codes à générer
+          default: 1
+          example: 5
+        expires_days:
+          type: integer
+          description: Durée de validité en jours
+          default: 30
+          example: 30
+responses:
+  201:
+    description: Codes générés avec succès
+    schema:
+      type: object
+      properties:
+        codes:
+          type: array
+          items:
+            type: string
+          example: ["ABC123", "DEF456", "GHI789"]
+        count:
+          type: integer
+          example: 3
+        expires_days:
+          type: integer
+          example: 30
+  403:
+    description: Non autorisé (admin requis)
+    schema:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Seul l'administrateur peut générer des codes"

@@ -1,0 +1,9 @@
+Statistiques conversations
+---
+tags:
+  - Administration
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Statistiques des conversations

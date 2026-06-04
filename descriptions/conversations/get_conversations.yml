@@ -1,0 +1,42 @@
+Liste toutes mes conversations (avec dernier message)
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: limit
+    in: query
+    type: integer
+    description: Nombre de conversations à récupérer
+    default: 50
+  - name: offset
+    in: query
+    type: integer
+    description: Pagination
+    default: 0
+responses:
+  200:
+    description: Liste des conversations
+    schema:
+      type: array
+      items:
+        type: object
+        properties:
+          id:
+            type: string
+          type:
+            type: string
+            enum: [direct, group]
+          name:
+            type: string
+          avatar_url:
+            type: string
+          unread_count:
+            type: integer
+          last_message:
+            type: object
+          other_user:
+            type: object
+  401:
+    description: Non authentifié

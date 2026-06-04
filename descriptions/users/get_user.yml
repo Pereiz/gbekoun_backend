@@ -1,0 +1,18 @@
+Récupère un utilisateur par ID
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+parameters:
+  - name: user_id
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Détails de l'utilisateur
+  401:
+    description: Non authentifié
+  404:
+    description: Utilisateur non trouvé

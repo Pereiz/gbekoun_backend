@@ -1,0 +1,19 @@
+Vérification santé du backend
+---
+tags:
+  - Utilitaires
+responses:
+  200:
+    description: État du serveur
+    schema:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, down]
+        timestamp:
+          type: string
+        services:
+          type: object
+        disk:
+          type: object

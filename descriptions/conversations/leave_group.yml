@@ -1,0 +1,21 @@
+Quitte un groupe
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+responses:
+  200:
+    description: Groupe quitté
+  401:
+    description: Non authentifié
+  403:
+    description: Non autorisé (admin ne peut pas quitter sans transférer)
+  404:
+    description: Conversation non trouvée

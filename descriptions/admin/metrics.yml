@@ -1,0 +1,9 @@
+Métriques système (CPU, mémoire, uptime)
+---
+tags:
+  - Administration
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Métriques système

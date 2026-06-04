@@ -1,0 +1,15 @@
+Messages épinglés/importants
+---
+tags:
+  - Messages
+security:
+  - BearerAuth: []
+parameters:
+  - name: limit
+    in: query
+    type: integer
+    description: Nombre de messages à récupérer
+    default: 50
+responses:
+  200:
+    description: Liste des messages épinglés

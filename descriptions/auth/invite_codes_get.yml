@@ -1,0 +1,49 @@
+Liste tous les codes d'invitation (Admin uniquement)
+---
+tags:
+  - Authentification
+  - Admin
+security:
+  - BearerAuth: []
+parameters:
+  - name: include_used
+    in: query
+    type: boolean
+    description: Inclure les codes déjà utilisés
+    default: true
+  - name: limit
+    in: query
+    type: integer
+    description: Nombre maximum de résultats
+    default: 100
+responses:
+  200:
+    description: Liste des codes
+    schema:
+      type: array
+      items:
+        type: object
+        properties:
+          code:
+            type: string
+            example: "ABC123"
+          used_by:
+            type: string
+            nullable: true
+            example: "550e8400-e29b-41d4-a716-446655440000"
+          used_by_name:
+            type: string
+            nullable: true
+            example: "John Doe"
+          used_at:
+            type: string
+            format: date-time
+            nullable: true
+          created_at:
+            type: string
+            format: date-time
+          expires_at:
+            type: string
+            format: date-time
+  403:
+    description: Non autorisé (admin requis)

@@ -1,0 +1,25 @@
+Suspend un compte
+---
+tags:
+  - Administration
+security:
+  - BearerAuth: []
+parameters:
+  - name: user_id
+    in: path
+    type: string
+    required: true
+  - name: body
+    in: body
+    schema:
+      type: object
+      properties:
+        reason:
+          type: string
+responses:
+  200:
+    description: Compte suspendu
+  403:
+    description: Non autorisé
+  404:
+    description: Utilisateur non trouvé

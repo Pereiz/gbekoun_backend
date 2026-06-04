@@ -1,0 +1,43 @@
+Crée une conversation 1-1
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required:
+        - phone_number
+      properties:
+        phone_number:
+          type: string
+          description: Numéro de téléphone de l'autre utilisateur
+          example: "+22990123456"
+responses:
+  200:
+    description: Conversation existante récupérée
+    schema:
+      type: object
+      properties:
+        id:
+          type: string
+        existing:
+          type: boolean
+          example: true
+  201:
+    description: Nouvelle conversation créée
+    schema:
+      type: object
+      properties:
+        id:
+          type: string
+  400:
+    description: Numéro requis
+  404:
+    description: Utilisateur non trouvé
+  401:
+    description: Non authentifié

@@ -1,0 +1,18 @@
+Bloque un utilisateur
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+parameters:
+  - name: user_id
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Utilisateur bloqué
+  400:
+    description: Impossible de se bloquer soi-même
+  404:
+    description: Utilisateur non trouvé

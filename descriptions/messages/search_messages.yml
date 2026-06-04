@@ -1,0 +1,27 @@
+Recherche dans les messages
+---
+tags:
+  - Messages
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: q
+    in: query
+    type: string
+    required: true
+    description: Terme de recherche
+  - name: limit
+    in: query
+    type: integer
+    description: Nombre de résultats
+    default: 50
+responses:
+  200:
+    description: Résultats de la recherche
+  403:
+    description: Non autorisé

@@ -1,0 +1,32 @@
+Liste les médias partagés dans une conversation
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: type
+    in: query
+    type: string
+    description: Filtrer par type (image, video, audio, file)
+  - name: limit
+    in: query
+    type: integer
+    description: Nombre de médias à récupérer
+    default: 50
+responses:
+  200:
+    description: Liste des médias
+    schema:
+      type: array
+      items:
+        type: object
+  401:
+    description: Non authentifié
+  403:
+    description: Non autorisé

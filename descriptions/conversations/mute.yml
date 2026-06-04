@@ -1,0 +1,30 @@
+Met en sourdine la conversation
+---
+tags:
+  - Conversations
+security:
+  - BearerAuth: []
+parameters:
+  - name: id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      properties:
+        duration_hours:
+          type: integer
+          description: Durée de la sourdine en heures
+          default: 8
+          example: 24
+responses:
+  200:
+    description: Conversation en sourdine
+  401:
+    description: Non authentifié
+  404:
+    description: Conversation non trouvée

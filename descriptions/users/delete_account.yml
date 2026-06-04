@@ -1,0 +1,22 @@
+Supprime son compte (soft delete)
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required:
+        - confirmation
+      properties:
+        confirmation:
+          type: boolean
+responses:
+  200:
+    description: Compte supprimé
+  400:
+    description: Confirmation requise

@@ -1,0 +1,21 @@
+Keep-alive pour maintenir le statut en ligne
+---
+tags:
+  - Statut & Présence
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Heartbeat reçu
+    schema:
+      type: object
+      properties:
+        message:
+          type: string
+        timestamp:
+          type: string
+        status:
+          type: string
+          example: "online"
+  401:
+    description: Non authentifié

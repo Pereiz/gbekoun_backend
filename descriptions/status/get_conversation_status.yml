@@ -1,0 +1,37 @@
+Statuts de tous les participants d'une conversation
+---
+tags:
+  - Statut & Présence
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+responses:
+  200:
+    description: Statuts des participants
+    schema:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+        participants:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id:
+                type: string
+              is_online:
+                type: boolean
+              last_seen:
+                type: string
+        total:
+          type: integer
+  401:
+    description: Non authentifié
+  404:
+    description: Conversation non trouvée

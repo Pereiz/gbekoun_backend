@@ -1,0 +1,27 @@
+Met à jour les paramètres de confidentialité
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      properties:
+        last_seen:
+          type: string
+          enum: [everyone, contacts, nobody]
+        profile_photo:
+          type: string
+          enum: [everyone, contacts, nobody]
+        about:
+          type: string
+          enum: [everyone, contacts, nobody]
+responses:
+  200:
+    description: Confidentialité mise à jour
+  400:
+    description: Valeur invalide

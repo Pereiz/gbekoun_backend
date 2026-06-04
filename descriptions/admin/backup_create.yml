@@ -1,0 +1,9 @@
+Crée un backup complet système
+---
+tags:
+  - Administration
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Backup créé

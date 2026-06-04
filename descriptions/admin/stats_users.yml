@@ -1,0 +1,24 @@
+Statistiques utilisateurs (total, actifs, nouveaux)
+---
+tags:
+  - Administration
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Statistiques des utilisateurs
+    schema:
+      type: object
+      properties:
+        total:
+          type: integer
+        active_today:
+          type: integer
+        new_last_7_days:
+          type: integer
+        suspended:
+          type: integer
+        online_now:
+          type: integer
+  403:
+    description: Non autorisé (admin requis)

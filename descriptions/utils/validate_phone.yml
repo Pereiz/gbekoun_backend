@@ -1,0 +1,44 @@
+Valide le format d'un numéro de téléphone
+---
+tags:
+  - Utilitaires
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required:
+        - phone
+      properties:
+        phone:
+          type: string
+          description: Numéro de téléphone en format international
+          example: "+22990123456"
+responses:
+  200:
+    description: Numéro valide
+    schema:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          example: true
+        message:
+          type: string
+        phone:
+          type: string
+        phone_clean:
+          type: string
+        country_code:
+          type: string
+  400:
+    description: Numéro invalide
+    schema:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          example: false
+        error:
+          type: string

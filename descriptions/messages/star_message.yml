@@ -1,0 +1,24 @@
+Épingle un message
+---
+tags:
+  - Messages
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: message_id
+    in: path
+    type: string
+    required: true
+    description: ID du message à épingler
+responses:
+  200:
+    description: Message épinglé
+  403:
+    description: Non autorisé
+  404:
+    description: Message non trouvé

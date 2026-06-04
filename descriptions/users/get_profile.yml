@@ -1,0 +1,42 @@
+Récupère son profil
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Profil utilisateur
+    schema:
+      type: object
+      properties:
+        id:
+          type: string
+        phone_number:
+          type: string
+        display_name:
+          type: string
+        username:
+          type: string
+        bio:
+          type: string
+        avatar_url:
+          type: string
+        is_online:
+          type: boolean
+        last_seen:
+          type: string
+        created_at:
+          type: string
+        is_admin:
+          type: boolean
+        privacy_last_seen:
+          type: string
+        privacy_profile_photo:
+          type: string
+        privacy_about:
+          type: string
+  401:
+    description: Non authentifié
+  404:
+    description: Utilisateur non trouvé

@@ -1,0 +1,16 @@
+Récupère son statut (online/last_seen)
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+responses:
+  200:
+    description: Statut utilisateur
+    schema:
+      type: object
+      properties:
+        is_online:
+          type: boolean
+        last_seen:
+          type: string

@@ -1,0 +1,35 @@
+Modifie un message
+---
+tags:
+  - Messages
+security:
+  - BearerAuth: []
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+    description: ID de la conversation
+  - name: message_id
+    in: path
+    type: string
+    required: true
+    description: ID du message
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: string
+          description: Nouveau contenu
+responses:
+  200:
+    description: Message modifié
+  403:
+    description: Non autorisé (n'est pas l'auteur)
+  404:
+    description: Message non trouvé
