@@ -185,12 +185,12 @@ def list_invite_codes():
     include_used = request.args.get('include_used', 'true').lower() == 'true'
     limit = request.args.get('limit', 100, type=int)
 
-    query = sql.SQL("""
+    query = """
         SELECT ic.code, ic.used_by, ic.used_at, ic.created_at, ic.expires_at,
                u.display_name as used_by_name
         FROM gbekoun.invite_codes ic
         LEFT JOIN gbekoun.users u ON u.id = ic.used_by
-    """)
+    """
     params = []
 
     if not include_used:
@@ -199,7 +199,7 @@ def list_invite_codes():
     query += " ORDER BY ic.created_at DESC LIMIT %s"
     params.append(limit)
 
-    codes = execute_query(query, tuple(params), fetch_all=True)
+    codes = execute_query(sql.SQL(query), tuple(params), fetch_all=True)
 
     return jsonify(codes), 200
 

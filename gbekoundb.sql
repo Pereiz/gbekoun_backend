@@ -227,6 +227,14 @@ ADD COLUMN IF NOT EXISTS privacy_profile_photo VARCHAR(20) DEFAULT 'everyone',
 ADD COLUMN IF NOT EXISTS privacy_about VARCHAR(20) DEFAULT 'everyone',
 ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
 
+-- =============================================================
+-- INSERTION D'UN USER PAR DEFAUT
+INSERT INTO gbekoun.users (id, phone_number, display_name, username, bio, is_online, last_seen, created_at, updated_at, is_suspended, is_admin, suspended_at, suspended_reason, privacy_last_seen, privacy_profile_photo, privacy_about, deleted_at)
+SELECT gen_random_uuid(), '+1234567890', 'Administrateur', 'admin', 'Administrateur principal du système', FALSE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, FALSE, TRUE, NULL, NULL, 'everyone', 'everyone', 'everyone', NULL
+WHERE NOT EXISTS (SELECT 1 FROM gbekoun.users WHERE username = 'admin' OR phone_number = '+1234567890');
+
+
+
 -- Ajouter la table des utilisateurs bloqués si elle n'existe pas
 CREATE TABLE IF NOT EXISTS gbekoun.blocked_users (
     blocker_id UUID NOT NULL REFERENCES gbekoun.users(id) ON DELETE CASCADE,
