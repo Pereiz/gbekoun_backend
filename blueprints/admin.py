@@ -10,6 +10,7 @@ from flasgger import swag_from
 from bson.objectid import ObjectId
 from psycopg2 import sql
 from app import execute_query, require_auth, messages_col, mongo_client
+import ssl
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
@@ -30,6 +31,14 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated
 
+# ===================== VERIFICATON DE LA VERSION DE OPENSSL =====================
+@admin_bp.route('/debug/openssl', methods=['GET'])
+@require_auth
+@require_admin
+@swag_from('../descriptions/admin/metrics.yml')
+def debug_openssl():
+    
+    return jsonify({'openssl_version': ssl.OPENSSL_VERSION})
 
 # ===================== STATISTIQUES =====================
 
