@@ -12,7 +12,7 @@ flask-cors
 eventlet
 flasgger
 psutil
-# pymongo[srv]==3.12
+pymongo[srv]==3.12
 
 # flask
 # flask-socketio
