@@ -90,47 +90,55 @@ def stats_messages():
     """
     Statistiques messages (par jour, total)
     """
-    # Total des messages
-    total_messages = messages_col.count_documents({})
-    
-    # Messages aujourd'hui
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_messages = messages_col.count_documents({
-        'timestamp': {'$gte': today_start}
-    })
-    
-    # Messages cette semaine
-    week_ago = datetime.utcnow() - timedelta(days=7)
-    week_messages = messages_col.count_documents({
-        'timestamp': {'$gte': week_ago}
-    })
-    
-    # Messages par type
-    messages_by_type = list(messages_col.aggregate([
-        {'$group': {'_id': '$type', 'count': {'$sum': 1}}}
-    ]))
-    
-    # Messages par jour (7 derniers jours)
-    daily_stats = []
-    for i in range(7, -1, -1):
-        day = datetime.utcnow() - timedelta(days=i)
-        day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
-        day_end = day_start + timedelta(days=1)
-        count = messages_col.count_documents({
-            'timestamp': {'$gte': day_start, '$lt': day_end}
+    try:
+
+        # Total des messages
+        total_messages = messages_col.count_documents({})
+        
+        # Messages aujourd'hui
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_messages = messages_col.count_documents({
+            'timestamp': {'$gte': today_start}
         })
-        daily_stats.append({
-            'date': day.strftime('%Y-%m-%d'),
-            'count': count
+        
+        # Messages cette semaine
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        week_messages = messages_col.count_documents({
+            'timestamp': {'$gte': week_ago}
         })
-    
-    return jsonify({
-        'total': total_messages,
-        'today': today_messages,
-        'last_7_days': week_messages,
-        'by_type': {item['_id']: item['count'] for item in messages_by_type if item['_id']},
-        'daily': daily_stats
-    }), 200
+        
+        # Messages par type
+        messages_by_type = list(messages_col.aggregate([
+            {'$group': {'_id': '$type', 'count': {'$sum': 1}}}
+        ]))
+        
+        # Messages par jour (7 derniers jours)
+        daily_stats = []
+        for i in range(7, -1, -1):
+            day = datetime.utcnow() - timedelta(days=i)
+            day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+            count = messages_col.count_documents({
+                'timestamp': {'$gte': day_start, '$lt': day_end}
+            })
+            daily_stats.append({
+                'date': day.strftime('%Y-%m-%d'),
+                'count': count
+            })
+        
+        return jsonify({
+            'total': total_messages,
+            'today': today_messages,
+            'last_7_days': week_messages,
+            'by_type': {item['_id']: item['count'] for item in messages_by_type if item['_id']},
+            'daily': daily_stats
+        }), 200
+    except Exception as e:
+        # Log l'erreur (avec import logging)
+        import logging
+        logging.error(f"Erreur dans stats_messages: {str(e)}")
+        # Renvoyer une réponse détaillée en développement, ou 500 avec message
+        return jsonify({'error': str(e)}), 500
 
 
 @admin_bp.route('/stats/conversations', methods=['GET'])
