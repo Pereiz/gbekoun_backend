@@ -33,9 +33,6 @@ class Config:
     PG_SCHEMA = 'gbekoun'
 
     MONGO_URI = os.getenv('MONGO_URI', 'mongodb://gbekoundb_user:gbekoundb_password_2024@localhost:27018/gbekoundb_messages?authSource=gbekoundb_messages')
-    if not MONGO_URI:
-        raise ValueError("MONGO_URI non définie")
-    print(MONGO_URI)
     MONGO_DB = os.getenv('MONGO_DB', 'gbekoundb_messages')
 
     UPLOAD_FOLDER = 'uploads'
@@ -79,13 +76,7 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
 # -------------------------------
 # MongoDB connection
 # -------------------------------
-#mongo_client = MongoClient(Config.MONGO_URI)
-# Forcer l'utilisation du bundle de certificats de certifi
-mongo_client = MongoClient(
-    Config.MONGO_URI,
-    tlsCAFile=certifi.where(),   # point clé
-    serverSelectionTimeoutMS=5000
-)
+mongo_client = MongoClient(Config.MONGO_URI)
 mongo_db = mongo_client[Config.MONGO_DB]
 messages_col = mongo_db['messages']
 media_col = mongo_db['media']
@@ -400,11 +391,6 @@ def start_cleanup_thread():
 cleanup_thread = threading.Thread(target=start_cleanup_thread, daemon=True)
 cleanup_thread.start()
 
-try:
-    mongo_client.admin.command('ping')
-    print("MongoDB connecté avec succès")
-except Exception as e:
-    print(f"Erreur de connexion MongoDB: {e}")
 
 # -------------------------------
 # Main
