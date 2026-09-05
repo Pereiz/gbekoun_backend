@@ -317,13 +317,32 @@ def add_reaction(conversation_id, message_id):
     if not message:
         return jsonify({'error': 'Message non trouvé'}), 404
     
-    # Ajouter ou mettre à jour la réaction
-    result = messages_col.update_one(
+    # Remplacer la réaction de l'utilisateur en une seule opération atomique.
+    messages_col.update_one(
         {'_id': ObjectId(message_id)},
-        {
-            '$pull': {'reactions': {'user_id': g.current_user_id}},
-            '$push': {'reactions': {'user_id': g.current_user_id, 'reaction': reaction}}
-        }
+        [
+            {
+                '$set': {
+                    'reactions': {
+                        '$concatArrays': [
+                            {
+                                '$filter': {
+                                    'input': {'$ifNull': ['$reactions', []]},
+                                    'as': 'existing_reaction',
+                                    'cond': {
+                                        '$ne': [
+                                            '$$existing_reaction.user_id',
+                                            g.current_user_id
+                                        ]
+                                    }
+                                }
+                            },
+                            [{'user_id': g.current_user_id, 'reaction': reaction}]
+                        ]
+                    }
+                }
+            }
+        ]
     )
     
     return jsonify({'message': 'Réaction ajoutée'}), 200
