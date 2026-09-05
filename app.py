@@ -206,9 +206,10 @@ app.register_blueprint(utils_bp)
 # -------------------------------
 # Routes simples
 # -------------------------------
-@app.route("/gbekoun/welcome", methods=['GET'])
+#@app.route("/gbekoun/welcome", methods=['GET'])
+@app.route("/", methods=['GET'])
 def welcome():
-    return jsonify({"Message": "Bonjour, vous êtes sur GBEKOUN !"}), HTTPStatus.OK
+    return jsonify({"Message": "Bonjour, vous etes sur GBEKOUN !"}), HTTPStatus.OK
 
 @app.route('/health', methods=['GET'])
 def health():

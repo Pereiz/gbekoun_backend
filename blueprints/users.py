@@ -376,7 +376,7 @@ def delete_account():
     # Soft delete : marquer comme supprimé
     execute_query(sql.SQL("""
         UPDATE gbekoun.users 
-        SET deleted_at = NOW(), is_online = FALSE, is_active = FALSE
+        SET deleted_at = NOW(), is_online = FALSE,  is_suspended = FALSE
         WHERE id = %s
     """), (g.current_user_id,))
     
