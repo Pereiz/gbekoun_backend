@@ -430,12 +430,12 @@ def add_participant(conversation_id):
         return jsonify({'error': 'Utilisateur non trouvé'}), 404
     
     # Ajouter le participant
-    execute_query(sql.SQL("""
+    execute_query("""
         INSERT INTO gbekoun.conversation_participants (conversation_id, user_id, is_admin)
         VALUES (%s, %s, FALSE)
         ON CONFLICT (conversation_id, user_id) DO UPDATE
         SET deleted_at = NULL
-    """), (conversation_id, user_to_add['id']))
+    """, (conversation_id, user_to_add['id']))
     
     return jsonify({'message': 'Participant ajouté'}), 200
 
