@@ -400,10 +400,10 @@ def add_participant(conversation_id):
         return jsonify({'error': 'Numéro de téléphone requis'}), 400
     
     # Vérifier que l'utilisateur courant est admin du groupe
-    admin_check = execute_query(sql.SQL("""
+    admin_check = execute_query("""
         SELECT is_admin FROM gbekoun.conversation_participants
         WHERE conversation_id = %s AND user_id = %s AND deleted_at IS NULL
-    """), (conversation_id, g.current_user_id), fetch_one=True)
+    """, (conversation_id, g.current_user_id), fetch_one=True)
     
     if not admin_check:
         return jsonify({'error': 'Conversation non trouvée'}), 404
