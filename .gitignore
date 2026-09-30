@@ -55,7 +55,7 @@ yarn-error.log*
 !setup_postgres_messaging.sql
 !gekoun_messages.js
 !init-mongo.js
-!gbekoundb.sql
+gbekoundb.sql
 render_db
 
 # Uploads

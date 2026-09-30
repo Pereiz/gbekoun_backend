@@ -13,11 +13,12 @@
 DO $$
 BEGIN
    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'gbekoundb_user') THEN
-      CREATE USER gbekoundb_user WITH PASSWORD 'postgres_password_2024';
+      CREATE USER gbekoundb_user WITH PASSWORD 'npg_bQYsShBkj97H';
    END IF;
 END
 $$;
-
+--npg_bQYsShBkj97H
+--postgres_password_2024
 -- 2. CRÉATION DE LA BASE DE DONNÉES
 -- =============================================================
 
