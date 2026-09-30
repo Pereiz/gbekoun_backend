@@ -5,7 +5,7 @@ tags:
 security:
   - BearerAuth: []
 parameters:
-  - name: id
+  - name: conversation_id
     in: path
     type: string
     required: true
