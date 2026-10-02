@@ -416,5 +416,4 @@ cleanup_thread.start()
 if __name__ == '__main__':
     print("Démarrage de l'application Flask avec SocketIO")
     print("Serveur démarré sur http://0.0.0.0:8880")
-    #socketio.run(app, host='0.0.0.0', port=8880, debug=Config.DEBUG)
-    socketio.run(app, host='0.0.0.0', port=8880, debug=True)
+    socketio.run(app, host='0.0.0.0', port=int(os.getenv('PORT', '8880')), debug=Config.DEBUG)

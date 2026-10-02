@@ -24,8 +24,8 @@ EXPOSE 8880
 ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
 
-# Commande pour lancer l'application avec SocketIO
-CMD ["python", "app.py"]
+# Gunicorn gthread prend en charge Socket.IO en mode threading.
+CMD ["sh", "-c", "exec gunicorn --worker-class gthread --workers 1 --threads 100 --bind 0.0.0.0:${PORT:-8880} app:app"]
 
 # COPY entrypoint.sh /entrypoint.sh
 # RUN chmod +x /entrypoint.sh
