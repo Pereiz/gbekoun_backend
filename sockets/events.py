@@ -583,17 +583,3 @@ def leave_conversation_room(user_id, conversation_id):
     
     if user_id in user_rooms and room in user_rooms[user_id]:
         user_rooms[user_id].remove(room)
-
-
-def join_connected_users_to_conversation(user_ids, conversation_id):
-    """Ajoute les sockets connectés des utilisateurs à une room."""
-    room = f"conv_{conversation_id}"
-    for user_id in user_ids:
-        try:
-            participants = list(socketio.server.manager.get_participants(
-                '/', f"user_{user_id}"
-            ))
-        except KeyError:
-            continue
-        for sid, _ in participants:
-            socketio.server.enter_room(sid, room, namespace='/')

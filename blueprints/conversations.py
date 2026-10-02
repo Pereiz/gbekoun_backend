@@ -11,8 +11,8 @@ from app import (
     put_db_connection,
     require_auth,
     messages_col,
+    join_connected_users_to_conversation,
 )
-from sockets.events import join_connected_users_to_conversation
 
 conversations_bp = Blueprint('conversations', __name__)
 

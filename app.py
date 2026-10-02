@@ -124,6 +124,21 @@ app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
+
+def join_connected_users_to_conversation(user_ids, conversation_id):
+    """Ajoute les sockets connectés à la room d'une conversation."""
+    room = f"conv_{conversation_id}"
+    for user_id in user_ids:
+        try:
+            participants = list(socketio.server.manager.get_participants(
+                '/', f"user_{user_id}"
+            ))
+        except KeyError:
+            continue
+        for sid, _ in participants:
+            socketio.server.enter_room(sid, room, namespace='/')
+
+
 from sockets.events import *
 
 # Configuration Swagger
