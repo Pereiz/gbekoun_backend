@@ -52,6 +52,7 @@ yarn-error.log*
 *.sqlite
 *.sqlite3
 *.sql
+!migrations/001_push_devices.sql
 !setup_postgres_messaging.sql
 !gekoun_messages.js
 !init-mongo.js

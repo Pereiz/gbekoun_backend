@@ -4,7 +4,7 @@ from flasgger import swag_from
 from bson.objectid import ObjectId
 from datetime import datetime
 from psycopg2 import sql
-from app import execute_query, require_auth, messages_col
+from app import execute_query, require_auth, messages_col, notify_new_message
 
 messages_bp = Blueprint('messages', __name__)
 
@@ -177,6 +177,7 @@ def send_message_rest(conversation_id):
     
     result = messages_col.insert_one(message)
     message_id = str(result.inserted_id)
+    notify_new_message(conversation_id, g.current_user_id, message_id)
     
     # Incrémenter unread_count des autres participants
     execute_query(sql.SQL("""

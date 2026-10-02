@@ -8,6 +8,68 @@ from app import execute_query, require_auth
 users_bp = Blueprint('users', __name__, url_prefix='/api/users')
 
 
+@users_bp.route('/me/push-token', methods=['POST'])
+@require_auth
+@swag_from('../descriptions/users/register_push_token.yml')
+def register_push_token():
+    data = request.get_json(silent=True) or {}
+    push_token = data.get('expo_push_token')
+    platform = data.get('platform', 'android')
+    device_id = data.get('device_id')
+
+    if not isinstance(push_token, str) or not (
+        push_token.startswith(('ExpoPushToken[', 'ExponentPushToken['))
+        and push_token.endswith(']')
+        and len(push_token) <= 512
+    ):
+        return jsonify({'error': 'Jeton Expo invalide'}), 400
+
+    if platform not in ('android', 'ios'):
+        return jsonify({'error': 'Plateforme non supportée'}), 400
+
+    if device_id is not None and (
+        not isinstance(device_id, str) or len(device_id) > 255
+    ):
+        return jsonify({'error': 'device_id invalide'}), 400
+
+    execute_query("""
+        INSERT INTO gbekoun.push_devices
+            (user_id, expo_push_token, platform, device_id, is_active, updated_at)
+        VALUES (%s, %s, %s, %s, TRUE, NOW())
+        ON CONFLICT (expo_push_token) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            platform = EXCLUDED.platform,
+            device_id = EXCLUDED.device_id,
+            is_active = TRUE,
+            updated_at = NOW()
+    """, (g.current_user_id, push_token, platform, device_id))
+
+    return jsonify({'registered': True}), 200
+
+
+@users_bp.route('/me/push-token', methods=['DELETE'])
+@require_auth
+@swag_from('../descriptions/users/unregister_push_token.yml')
+def unregister_push_token():
+    data = request.get_json(silent=True) or {}
+    push_token = data.get('expo_push_token')
+
+    if not isinstance(push_token, str) or not (
+        push_token.startswith(('ExpoPushToken[', 'ExponentPushToken['))
+        and push_token.endswith(']')
+        and len(push_token) <= 512
+    ):
+        return jsonify({'error': 'Jeton Expo invalide'}), 400
+
+    execute_query("""
+        UPDATE gbekoun.push_devices
+        SET is_active = FALSE, updated_at = NOW()
+        WHERE user_id = %s AND expo_push_token = %s
+    """, (g.current_user_id, push_token))
+
+    return jsonify({'registered': False}), 200
+
+
 # ===================== PROFIL UTILISATEUR =====================
 
 @users_bp.route('/me', methods=['GET'])

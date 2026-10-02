@@ -1,0 +1,32 @@
+Enregistre ou réactive un jeton de notification Expo pour l'appareil authentifié.
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required:
+        - expo_push_token
+      properties:
+        expo_push_token:
+          type: string
+          example: ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]
+        platform:
+          type: string
+          enum: [android, ios]
+          default: android
+        device_id:
+          type: string
+          description: Identifiant facultatif de l'installation mobile.
+responses:
+  200:
+    description: Jeton enregistré
+  400:
+    description: Jeton ou plateforme invalide
+  401:
+    description: Non authentifié

@@ -4,7 +4,14 @@ from flask import request
 from datetime import datetime
 from bson.objectid import ObjectId
 
-from app import socketio, execute_query, verify_token, messages_col, mongo_db
+from app import (
+    socketio,
+    execute_query,
+    verify_token,
+    messages_col,
+    mongo_db,
+    notify_new_message,
+)
 
 
 # ===================== STOCKAGE EN MÉMOIRE =====================
@@ -217,6 +224,7 @@ def handle_send_message(data):
     message_id = str(result.inserted_id)
     message['_id'] = message_id
     socket_message = {**message, 'timestamp': message['timestamp'].isoformat()}
+    notify_new_message(conversation_id, user_id, message_id)
     
     # Incrémenter unread_count des autres participants
     execute_query("""

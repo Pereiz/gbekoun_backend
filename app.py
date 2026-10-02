@@ -1,12 +1,13 @@
 # app.py
 import os
+import logging
 from datetime import datetime, timedelta
 from functools import wraps
 import certifi
 import jwt
 #import psycopg2
 from psycopg2.extras import RealDictCursor
-from psycopg2.pool import SimpleConnectionPool
+from psycopg2.pool import ThreadedConnectionPool
 from pymongo import MongoClient
 from flask import Flask, request, jsonify, g
 from flask_cors import CORS
@@ -14,6 +15,7 @@ from flask_socketio import SocketIO, emit, join_room
 from dotenv import load_dotenv
 from http import HTTPStatus
 from flasgger import Swagger, swag_from
+from utils.expo_push import send_expo_messages
 
 load_dotenv()
 
@@ -42,7 +44,7 @@ class Config:
 # -------------------------------
 # PostgreSQL pool
 # -------------------------------
-pg_pool = SimpleConnectionPool(
+pg_pool = ThreadedConnectionPool(
     minconn=1,
     maxconn=10,
     host=Config.PG_HOST,
@@ -123,6 +125,62 @@ app.config['SECRET_KEY'] = Config.SECRET_KEY
 app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+logger = logging.getLogger(__name__)
+
+
+def _deliver_message_pushes(conversation_id, sender_id, message_id):
+    try:
+        devices = execute_query("""
+            SELECT pd.expo_push_token
+            FROM gbekoun.conversation_participants cp
+            JOIN gbekoun.push_devices pd ON pd.user_id = cp.user_id
+            WHERE cp.conversation_id = %s
+              AND cp.user_id != %s
+              AND cp.deleted_at IS NULL
+              AND (cp.muted_until IS NULL OR cp.muted_until <= NOW())
+              AND pd.is_active = TRUE
+        """, (conversation_id, sender_id), fetch_all=True)
+
+        if not devices:
+            return
+
+        push_messages = [{
+            'to': device['expo_push_token'],
+            'title': 'GBEKOUN',
+            'body': 'Vous avez reçu un nouveau message.',
+            'sound': 'default',
+            'data': {
+                'type': 'message',
+                'conversation_id': str(conversation_id),
+                'message_id': str(message_id),
+            },
+        } for device in devices]
+
+        for offset in range(0, len(push_messages), 100):
+            batch = push_messages[offset:offset + 100]
+            response = send_expo_messages(batch)
+            tickets = response.get('data', [])
+            for push_message, ticket in zip(batch, tickets):
+                if ticket.get('status') != 'error':
+                    continue
+
+                error = ticket.get('details', {}).get('error')
+                if error == 'DeviceNotRegistered':
+                    execute_query("""
+                        UPDATE gbekoun.push_devices
+                        SET is_active = FALSE, updated_at = NOW()
+                        WHERE expo_push_token = %s
+                    """, (push_message['to'],))
+                else:
+                    logger.warning('Expo push rejected a message: %s', error)
+    except Exception:
+        logger.exception('Failed to deliver Expo push notifications')
+
+
+def notify_new_message(conversation_id, sender_id, message_id):
+    socketio.start_background_task(
+        _deliver_message_pushes, conversation_id, sender_id, message_id
+    )
 
 
 def join_connected_users_to_conversation(user_ids, conversation_id):
@@ -313,6 +371,7 @@ def handle_send_message(data):
     msg_id = str(result.inserted_id)
     message['_id'] = msg_id
     socket_message = {**message, 'timestamp': message['timestamp'].isoformat()}
+    notify_new_message(conversation_id, user_id, msg_id)
     
     execute_query(
         "UPDATE gbekoun.conversation_participants SET unread_count = unread_count + 1 WHERE conversation_id = %s AND user_id != %s",

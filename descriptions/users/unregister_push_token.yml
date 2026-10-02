@@ -1,0 +1,25 @@
+Désactive un jeton de notification Expo appartenant à l'utilisateur authentifié.
+---
+tags:
+  - Utilisateurs
+security:
+  - BearerAuth: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required:
+        - expo_push_token
+      properties:
+        expo_push_token:
+          type: string
+          example: ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]
+responses:
+  200:
+    description: Jeton désactivé
+  400:
+    description: Jeton invalide
+  401:
+    description: Non authentifié
