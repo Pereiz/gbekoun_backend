@@ -216,6 +216,7 @@ def handle_send_message(data):
     result = messages_col.insert_one(message)
     message_id = str(result.inserted_id)
     message['_id'] = message_id
+    socket_message = {**message, 'timestamp': message['timestamp'].isoformat()}
     
     # Incrémenter unread_count des autres participants
     execute_query("""
@@ -231,12 +232,12 @@ def handle_send_message(data):
     emit('message_sent', {'message_id': message_id}, to=request.sid)
 
     # Envoyer le message à tous les participants
-    emit('new_message', message, room=f"conv_{conversation_id}", include_self=False)
+    emit('new_message', socket_message, room=f"conv_{conversation_id}", include_self=False)
     
     # Confirmation à l'expéditeur
     emit('message_sent', {
         'message_id': message_id,
-        'timestamp': message['timestamp'].isoformat()
+        'timestamp': socket_message['timestamp']
     })
 
 
@@ -582,3 +583,17 @@ def leave_conversation_room(user_id, conversation_id):
     
     if user_id in user_rooms and room in user_rooms[user_id]:
         user_rooms[user_id].remove(room)
+
+
+def join_connected_users_to_conversation(user_ids, conversation_id):
+    """Ajoute les sockets connectés des utilisateurs à une room."""
+    room = f"conv_{conversation_id}"
+    for user_id in user_ids:
+        try:
+            participants = list(socketio.server.manager.get_participants(
+                '/', f"user_{user_id}"
+            ))
+        except KeyError:
+            continue
+        for sid, _ in participants:
+            socketio.server.enter_room(sid, room, namespace='/')

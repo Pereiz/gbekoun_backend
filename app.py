@@ -23,6 +23,7 @@ load_dotenv()
 class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
     JWT_SECRET = os.getenv('JWT_SECRET', 'jwt-secret-key')
+    DEBUG = os.getenv('FLASK_DEBUG', '0').lower() in ('1', 'true', 'yes', 'on')
     JWT_EXPIRATION_DAYS = 30
 
     PG_HOST = os.getenv('PG_HOST', 'localhost')
@@ -296,14 +297,15 @@ def handle_send_message(data):
     result = messages_col.insert_one(message)
     msg_id = str(result.inserted_id)
     message['_id'] = msg_id
+    socket_message = {**message, 'timestamp': message['timestamp'].isoformat()}
     
     execute_query(
         "UPDATE gbekoun.conversation_participants SET unread_count = unread_count + 1 WHERE conversation_id = %s AND user_id != %s",
         (conversation_id, user_id)
     )
     
-    emit('new_message', message, room=f"conv_{conversation_id}", include_self=False)
-    emit('message_sent', {'message_id': msg_id, 'timestamp': message['timestamp']})
+    emit('new_message', socket_message, room=f"conv_{conversation_id}", include_self=False)
+    emit('message_sent', {'message_id': msg_id, 'timestamp': socket_message['timestamp']})
 
 @socketio.on('typing')
 def handle_typing(data):
@@ -399,4 +401,4 @@ cleanup_thread.start()
 if __name__ == '__main__':
     print("Démarrage de l'application Flask avec SocketIO")
     print("Serveur démarré sur http://0.0.0.0:8880")
-    socketio.run(app, host='0.0.0.0', port=8880, debug=True)
+    socketio.run(app, host='0.0.0.0', port=8880, debug=Config.DEBUG)

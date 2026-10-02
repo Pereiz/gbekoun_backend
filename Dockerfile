@@ -25,7 +25,7 @@ ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
 
 # Commande pour lancer l'application avec SocketIO
-CMD ["python", "-m", "flask", "run", "--host=0.0.0.0", "--port=8880"]
+CMD ["python", "app.py"]
 
 # COPY entrypoint.sh /entrypoint.sh
 # RUN chmod +x /entrypoint.sh

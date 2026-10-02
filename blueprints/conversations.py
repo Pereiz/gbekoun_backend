@@ -4,7 +4,15 @@ from flasgger import swag_from
 import uuid
 from datetime import datetime, timedelta
 from psycopg2 import sql
-from app import execute_query, require_auth, messages_col
+from psycopg2.extras import RealDictCursor
+from app import (
+    execute_query,
+    get_db_connection,
+    put_db_connection,
+    require_auth,
+    messages_col,
+)
+from sockets.events import join_connected_users_to_conversation
 
 conversations_bp = Blueprint('conversations', __name__)
 
@@ -84,36 +92,62 @@ def create_direct():
     
     other_user_id = other_user['id']
     
-    # Vérifier si une conversation directe existe déjà
-    existing = execute_query(sql.SQL("""
-        SELECT c.id
-        FROM gbekoun.conversations c
-        JOIN gbekoun.conversation_participants cp1 ON cp1.conversation_id = c.id
-        JOIN gbekoun.conversation_participants cp2 ON cp2.conversation_id = c.id
-        WHERE c.type = 'direct' 
-        AND cp1.user_id = %s AND cp2.user_id = %s
-        AND cp1.deleted_at IS NULL AND cp2.deleted_at IS NULL
-    """), (g.current_user_id, other_user_id), fetch_one=True)
-    
-    if existing:
-        return jsonify({'id': existing['id'], 'existing': True}), 200
-    
-    # Créer une nouvelle conversation directe
-    conversation_id = str(uuid.uuid4())
-    
-    execute_query(sql.SQL("""
-        INSERT INTO gbekoun.conversations (id, type, created_by)
-        VALUES (%s, 'direct', %s)
-    """), (conversation_id, g.current_user_id))
-    
-    # Ajouter les deux participants
-    for user_id in [g.current_user_id, other_user_id]:
-        execute_query(sql.SQL("""
-            INSERT INTO gbekoun.conversation_participants (conversation_id, user_id)
-            VALUES (%s, %s)
-        """), (conversation_id, user_id))
-    
-    return jsonify({'id': conversation_id}), 201
+    # Serialize creation for this unordered pair, including across app workers.
+    pair_lock_key = ':'.join(
+        sorted((str(g.current_user_id), str(other_user_id)))
+    )
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (pair_lock_key,)
+            )
+            cur.execute("""
+                SELECT c.id
+                FROM gbekoun.conversations c
+                JOIN gbekoun.conversation_participants cp1 ON cp1.conversation_id = c.id
+                JOIN gbekoun.conversation_participants cp2 ON cp2.conversation_id = c.id
+                WHERE c.type = 'direct'
+                AND cp1.user_id = %s AND cp2.user_id = %s
+                AND cp1.deleted_at IS NULL AND cp2.deleted_at IS NULL
+                AND cp1.user_id != cp2.user_id
+                AND (
+                    SELECT COUNT(*)
+                    FROM gbekoun.conversation_participants cp3
+                    WHERE cp3.conversation_id = c.id AND cp3.deleted_at IS NULL
+                ) = 2
+                ORDER BY c.created_at, c.id
+                LIMIT 1
+            """, (g.current_user_id, other_user_id))
+            existing = cur.fetchone()
+
+            if existing:
+                conn.commit()
+                join_connected_users_to_conversation(
+                    (g.current_user_id, other_user_id), existing['id']
+                )
+                return jsonify({'id': existing['id'], 'existing': True}), 200
+
+            conversation_id = str(uuid.uuid4())
+            cur.execute("""
+                INSERT INTO gbekoun.conversations (id, type, created_by)
+                VALUES (%s, 'direct', %s)
+            """, (conversation_id, g.current_user_id))
+            cur.executemany("""
+                INSERT INTO gbekoun.conversation_participants (conversation_id, user_id)
+                VALUES (%s, %s)
+            """, [(conversation_id, g.current_user_id), (conversation_id, other_user_id)])
+            conn.commit()
+            join_connected_users_to_conversation(
+                (g.current_user_id, other_user_id), conversation_id
+            )
+            return jsonify({'id': conversation_id}), 201
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        put_db_connection(conn)
 
 
 @conversations_bp.route('/group', methods=['POST'])

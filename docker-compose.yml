@@ -9,9 +9,9 @@ services:
       - "8880:8880"  # Expose Flask sur le port 5000 de ta machine
     environment:
       # Variables d'environnement pour Flask
-      FLASK_ENV: development
+      FLASK_ENV: production
       FLASK_APP: app.py
-      FLASK_DEBUG: 1 
+      FLASK_DEBUG: "0"
       SECRET_KEY: dev-secret-key-docker
       JWT_SECRET: jwt-secret-key-docker
 
