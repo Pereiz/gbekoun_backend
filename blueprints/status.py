@@ -2,9 +2,9 @@
 from flask import Blueprint, request, jsonify, g
 from flasgger import swag_from
 from datetime import datetime, timedelta
-from functools import wraps
 from psycopg2 import sql
-from app import execute_query, require_auth
+from core.database import execute_query
+from core.security import require_auth
 
 status_bp = Blueprint('status', __name__, url_prefix='/api/status')
 
@@ -185,7 +185,7 @@ def update_online():
     """
     Met à jour son statut online
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     is_online = data.get('is_online', True)
     
     # Mettre à jour la base de données

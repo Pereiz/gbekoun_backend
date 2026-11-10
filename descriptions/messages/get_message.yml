@@ -17,7 +17,23 @@ parameters:
     description: ID du message
 responses:
   200:
-    description: Détails du message
+    description: Détails du message, y compris son marqueur si supprimé pour tous.
+    schema:
+      type: object
+      properties:
+        _id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+          description: Date d'envoi au format ISO 8601 UTC (suffixe Z)
+        is_deleted:
+          type: boolean
+        deleted_at:
+          type: string
+          format: date-time
+        deleted_by:
+          type: string
   403:
     description: Non autorisé
   404:

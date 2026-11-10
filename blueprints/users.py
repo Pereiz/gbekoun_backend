@@ -1,9 +1,10 @@
 # blueprints/users.py
 from flask import Blueprint, request, jsonify, g
 from flasgger import swag_from
-from datetime import datetime
 from psycopg2 import sql
-from app import execute_query, require_auth
+from core.database import execute_query
+from core.realtime import disconnect_user
+from core.security import require_auth
 
 users_bp = Blueprint('users', __name__, url_prefix='/api/users')
 
@@ -100,7 +101,7 @@ def update_profile():
     """
     Met à jour son profil
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     updates = []
     params = []
     
@@ -377,7 +378,7 @@ def update_privacy():
     """
     Met à jour les paramètres de confidentialité
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     updates = []
     params = []
     
@@ -429,7 +430,7 @@ def delete_account():
     """
     Supprime son compte (soft delete)
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     confirmation = data.get('confirmation', False)
     
     if not confirmation:
@@ -442,7 +443,6 @@ def delete_account():
         WHERE id = %s
     """), (g.current_user_id,))
     
-    # Anonymiser les messages existants
-    # Le flag deleted_for est déjà géré par MongoDB
-    
+    # Ses connexions temps réel sont fermées ; ses tokens sont refusés par require_auth.
+    disconnect_user(g.current_user_id)
     return jsonify({'message': 'Compte supprimé'}), 200

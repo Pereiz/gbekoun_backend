@@ -22,7 +22,7 @@ parameters:
     default: false
 responses:
   200:
-    description: Message supprimé
+    description: Message supprimé. Pour tous, son contenu est remplacé par un marqueur persistant.
   403:
     description: Non autorisé
   404:

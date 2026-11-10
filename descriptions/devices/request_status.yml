@@ -1,0 +1,36 @@
+État d'une demande (appelé par le NOUVEL appareil)
+Statuts : pending, approved (la réponse contient alors token/user_id/device_id), rejected, expired.
+Seul l'appareil qui a créé la demande peut la consulter (même device_secret).
+---
+tags:
+  - Appareils
+security: []
+parameters:
+  - name: request_id
+    in: path
+    type: string
+    required: true
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required: [device_secret]
+      properties:
+        device_secret:
+          type: string
+responses:
+  200:
+    description: État de la demande
+    schema:
+      type: object
+      properties:
+        request_id: {type: string}
+        status: {type: string, enum: [pending, approved, rejected, expired]}
+        token: {type: string, description: "Présent seulement si approved"}
+        user_id: {type: string}
+        device_id: {type: string}
+        display_name: {type: string}
+        username: {type: string}
+  404:
+    description: REQUEST_NOT_FOUND (identifiant inconnu ou device_secret différent)

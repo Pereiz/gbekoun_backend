@@ -1,0 +1,22 @@
+Refuser le nouvel appareil (appelé par l'appareil ACTIF)
+Rien ne change pour l'appareil actif ; le nouvel appareil verra status = rejected.
+---
+tags:
+  - Appareils
+parameters:
+  - name: request_id
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Décision enregistrée
+    schema:
+      type: object
+      properties:
+        request_id: {type: string}
+        status: {type: string, example: rejected}
+  404:
+    description: REQUEST_NOT_FOUND
+  409:
+    description: REQUEST_NOT_PENDING (déjà traitée ou expirée)

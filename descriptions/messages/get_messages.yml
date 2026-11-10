@@ -39,6 +39,21 @@ responses:
             type: string
           timestamp:
             type: string
+            format: date-time
+            description: Date d'envoi au format ISO 8601 UTC (suffixe Z)
+          reply_to_id:
+            type: string
+            description: ID du message auquel cette réponse se rapporte
+          is_deleted:
+            type: boolean
+            description: Indique si le message a été supprimé pour tous
+          deleted_at:
+            type: string
+            format: date-time
+            description: Date de suppression pour tous au format ISO 8601 UTC
+          deleted_by:
+            type: string
+            description: ID de l'utilisateur ayant supprimé le message pour tous
           read_by:
             type: array
           reactions:

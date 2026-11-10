@@ -1,98 +1,71 @@
-version: '3.8'
+# Environnement de développement complet : API + PostgreSQL + MongoDB.
+#
+#   cp .env.example .env      # puis remplir les mots de passe
+#   docker compose up --build
+#
+# Aucun secret ici : tout vient du fichier .env (non versionné).
+# Ce fichier n'est PAS utilisé par Render (qui construit seulement le Dockerfile).
 
 services:
-  flask_app:
-    build: .  # Construit l'image à partir du Dockerfile
-    container_name: flask_chat_app
-    restart: always
-    ports:
-      - "8880:8880"  # Expose Flask sur le port 5000 de ta machine
+  api:
+    build: .
+    container_name: gbekoun_api
+    restart: unless-stopped
+    env_file: .env
     environment:
-      # Variables d'environnement pour Flask
-      FLASK_ENV: production
-      FLASK_APP: app.py
-      FLASK_DEBUG: "0"
-      SECRET_KEY: dev-secret-key-docker
-      JWT_SECRET: jwt-secret-key-docker
-
-      # Connexions aux bases de données
-      # PostgreSQL
-      PG_HOST: dpg-d8gq7k0jo6nc73es62rg-a
-      PG_PORT: 5432
-      PG_DATABASE: gbekoundb
-      PG_USER: gbekoundb_user
-      PG_PASSWORD: ewG2HtIGqBDC0NZe7G88Q2tNOUX6Xh0M
-
-      # MongoDB
-      MONGO_URI: mongodb://admin:admin123@mongodb:27017/gbekoundb_messages?authSource=admin
-      MONGO_DB: gbekoundb_messages
-
-            # Upload folder
-      UPLOAD_FOLDER: /app/uploads
-
+      # Dans le réseau Docker, les bases sont joignables par leur nom de service.
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      MONGO_URI: mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017/${MONGO_DB:-gbekoundb_messages}?authSource=admin
+    ports:
+      - "${PORT:-8880}:8880"
     volumes:
-      # Pour le développement avec rechargement automatique
-      - .:/app
       - uploads_data:/app/uploads
-    # depends_on:
-    #   postgresql:
-    #     condition: service_healthy
-    #   mongodb:
-    #     condition: service_healthy
-    networks:
-      - chat_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
 
-  # postgresql:
-  #   image: postgres:15
-  #   container_name: postgres_chat
-  #   restart: always
-  #   ports:
-  #     - "5435:5432"
-  #   environment:
-  #     POSTGRES_DB: gbekoundb
-  #     POSTGRES_USER: gbekoundb_user
-  #     POSTGRES_PASSWORD: postgres_password_2024
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #     - ./setup_postgres_messaging.sql:/docker-entrypoint-initdb.d/init.sql:ro
-  #   networks:
-  #     - chat_network
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U gbekoundb_user -d gbekoundb"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  postgres:
+    image: postgres:16
+    container_name: gbekoun_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DATABASE}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    ports:
+      - "5435:5432"   # accès depuis la machine hôte : localhost:5435
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/postgres/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DATABASE}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-  # mongodb:
-  #   image: mongo:6.0
-  #   container_name: mongodb_chat
-  #   restart: always
-  #   ports:
-  #     - "27020:27017"
-  #   environment:
-  #     MONGO_INITDB_ROOT_USERNAME: admin
-  #     MONGO_INITDB_ROOT_PASSWORD: admin123
-  #     MONGO_INITDB_DATABASE: gbekoundb_messages
-  #   volumes:
-  #     - mongodb_data:/data/db
-  #     - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
-  #   networks:
-  #     - chat_network
-  #   healthcheck:
-  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-
+  mongo:
+    image: mongo:7
+    container_name: gbekoun_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-gbekoundb_messages}
+    ports:
+      - "27020:27017"  # accès depuis la machine hôte : localhost:27020
+    volumes:
+      - mongo_data:/data/db
+      - ./database/mongo/init.js:/docker-entrypoint-initdb.d/01_init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
-  # postgres_data:
-  #   driver: local
-  # mongodb_data:
-  #   driver: local
+  postgres_data:
+  mongo_data:
   uploads_data:
-    driver: local
-
-networks:
-  chat_network:
-    driver: bridge

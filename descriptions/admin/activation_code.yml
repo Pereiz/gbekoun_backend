@@ -1,0 +1,27 @@
+Générer un code d'activation d'appareil pour un utilisateur
+Cas : téléphone perdu, cassé, ou ancien appareil inaccessible. À transmettre par un canal
+sûr (en personne, ou en RAPPELANT le numéro du compte). Usage unique, 30 minutes, 5 essais.
+Générer un nouveau code annule le précédent.
+---
+tags:
+  - Administration
+parameters:
+  - name: user_id
+    in: path
+    type: string
+    required: true
+responses:
+  201:
+    description: Code généré (affiché une seule fois, non récupérable ensuite)
+    schema:
+      type: object
+      properties:
+        user_id: {type: string}
+        phone_number: {type: string}
+        display_name: {type: string}
+        activation_code: {type: string, example: "K7MP-2XQR"}
+        expires_at: {type: string, example: "2026-11-11T11:00:00.000Z"}
+  403:
+    description: ADMIN_REQUIRED
+  404:
+    description: USER_NOT_FOUND

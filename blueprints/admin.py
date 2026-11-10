@@ -1,35 +1,31 @@
 # blueprints/admin.py
+import logging
 import os
-import json
 import shutil
+import ssl
 import subprocess
 from datetime import datetime, timedelta
-from functools import wraps
 from flask import Blueprint, request, jsonify, g
 from flasgger import swag_from
-from bson.objectid import ObjectId
 from psycopg2 import sql
-from app import execute_query, require_auth, messages_col, mongo_client
-import ssl
+from core.config import Config
+from core.database import execute_query, messages_col, transaction
+from core.http import error_response
+from core.realtime import disconnect_user
+from core.security import require_admin, require_auth
+from services.devices import (
+    create_activation_code,
+    disconnect_devices,
+    format_activation_code,
+    lock_user_devices,
+    revoke_active_device,
+)
+from utils.message_helpers import to_utc_isoformat
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
+logger = logging.getLogger(__name__)
 
-
-# ===================== DÉCORATEUR ADMIN =====================
-
-def require_admin(f):
-    """Décorateur pour vérifier que l'utilisateur est admin"""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        # Vérifier si l'utilisateur est admin
-        user = execute_query(
-            sql.SQL("""SELECT is_admin FROM gbekoun.users WHERE id = %s"""),
-            (g.current_user_id,), fetch_one=True
-        )
-        if not user or not user.get('is_admin'):
-            return jsonify({'error': 'Accès non autorisé. Droits administrateur requis.'}), 403
-        return f(*args, **kwargs)
-    return decorated
+BACKUP_TIMEOUT_SECONDS = 15 * 60
 
 # ===================== VERIFICATON DE LA VERSION DE OPENSSL =====================
 @admin_bp.route('/debug/openssl', methods=['GET'])
@@ -252,7 +248,7 @@ def suspend_user(user_id):
     """
     Suspend un compte
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     reason = data.get('reason', 'Aucune raison fournie')
     
     # Vérifier que l'utilisateur existe
@@ -274,11 +270,13 @@ def suspend_user(user_id):
         WHERE id = %s
     """), (reason, user_id))
     
-    # Déconnecter l'utilisateur (forcer offline)
+    # Déconnecter l'utilisateur : statut hors ligne + fermeture de ses sockets.
+    # Ses requêtes REST sont aussi refusées (contrôle dans require_auth).
     execute_query(sql.SQL("""
         UPDATE gbekoun.users SET is_online = FALSE WHERE id = %s
     """), (user_id,))
-    
+    disconnect_user(user_id)
+
     return jsonify({
         'message': 'Utilisateur suspendu avec succès',
         'user_id': user_id,
@@ -338,11 +336,93 @@ def delete_user(user_id):
     
     # Supprimer l'utilisateur de PostgreSQL (hard delete)
     execute_query(sql.SQL("""DELETE FROM gbekoun.users WHERE id = %s"""), (user_id,))
-    
+    disconnect_user(user_id)
+
     return jsonify({
         'message': 'Compte supprimé définitivement',
         'user_id': user_id
     }), 200
+
+
+# ===================== APPAREILS DES UTILISATEURS =====================
+
+def _active_user(user_id):
+    return execute_query("""
+        SELECT id, phone_number, display_name FROM gbekoun.users
+        WHERE id = %s AND deleted_at IS NULL
+    """, (user_id,), fetch_one=True)
+
+
+@admin_bp.route('/users/<user_id>/activation-code', methods=['POST'])
+@require_auth
+@require_admin
+@swag_from('../descriptions/admin/activation_code.yml')
+def generate_activation_code(user_id):
+    """Code d'activation pour un nouvel appareil (ancien téléphone perdu/inaccessible).
+
+    À transmettre par un canal sûr (en personne, ou en rappelant le numéro du compte).
+    Usage unique, valable 30 minutes, 5 essais. Remplace le code précédent.
+    """
+    user = _active_user(user_id)
+    if not user:
+        return error_response('Utilisateur non trouvé', 404, 'USER_NOT_FOUND')
+
+    with transaction() as cur:
+        code, expires_at = create_activation_code(cur, user_id, g.current_user_id)
+
+    return jsonify({
+        'user_id': user_id,
+        'phone_number': user['phone_number'],
+        'display_name': user['display_name'],
+        'activation_code': format_activation_code(code),
+        'expires_at': to_utc_isoformat(expires_at),
+    }), 201
+
+
+@admin_bp.route('/users/<user_id>/devices', methods=['GET'])
+@require_auth
+@require_admin
+@swag_from('../descriptions/admin/list_devices.yml')
+def list_user_devices(user_id):
+    """Historique des appareils d'un utilisateur (le premier est l'appareil actif, s'il y en a un)."""
+    devices = execute_query("""
+        SELECT id, device_name, platform, created_at, last_seen_at, revoked_at, revoked_reason
+        FROM gbekoun.user_devices
+        WHERE user_id = %s
+        ORDER BY revoked_at IS NULL DESC, created_at DESC
+        LIMIT 50
+    """, (user_id,), fetch_all=True)
+    return jsonify([{
+        'device_id': str(d['id']),
+        'device_name': d['device_name'],
+        'platform': d['platform'],
+        'is_active': d['revoked_at'] is None,
+        'activated_at': to_utc_isoformat(d['created_at']) if d['created_at'] else None,
+        'last_seen_at': to_utc_isoformat(d['last_seen_at']) if d['last_seen_at'] else None,
+        'revoked_at': to_utc_isoformat(d['revoked_at']) if d['revoked_at'] else None,
+        'revoked_reason': d['revoked_reason'],
+    } for d in devices]), 200
+
+
+@admin_bp.route('/users/<user_id>/devices/revoke', methods=['POST'])
+@require_auth
+@require_admin
+@swag_from('../descriptions/admin/revoke_device.yml')
+def revoke_user_device(user_id):
+    """Révoque l'appareil actif (téléphone volé) : déconnexion immédiate.
+
+    L'utilisateur devra ensuite activer son nouvel appareil avec un code admin.
+    """
+    if not _active_user(user_id):
+        return error_response('Utilisateur non trouvé', 404, 'USER_NOT_FOUND')
+
+    with transaction() as cur:
+        lock_user_devices(cur, user_id)
+        revoked_ids = revoke_active_device(cur, user_id, 'revoked_by_admin')
+        cur.execute("UPDATE gbekoun.users SET is_online = FALSE WHERE id = %s", (user_id,))
+
+    disconnect_devices(revoked_ids)
+    return jsonify({'user_id': user_id, 'revoked': len(revoked_ids)}), 200
 
 
 # ===================== GESTION DES SIGNALEMENTS =====================
@@ -404,7 +484,7 @@ def resolve_report(report_id):
     """
     Résout un signalement
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     action = data.get('action', 'ignored')  # ignored, warned, suspended, banned
     
     # Vérifier que le signalement existe
@@ -427,9 +507,10 @@ def resolve_report(report_id):
         execute_query(sql.SQL("""
             UPDATE gbekoun.users 
             SET is_suspended = TRUE, suspended_at = NOW(), 
-                suspended_reason = 'Signalement validé par admin'
+                suspended_reason = 'Signalement validé par admin', is_online = FALSE
             WHERE id = %s
         """), (report['reported_id'],))
+        disconnect_user(str(report['reported_id']))
     
     return jsonify({
         'message': 'Signalement résolu',
@@ -448,36 +529,60 @@ def create_backup():
     """
     Crée un backup complet du système
     """
-    backup_dir = f"backups/backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    # Avant : les commandes pg_dump / mongodump étaient construites mais jamais
+    # exécutées, l'archive ne contenait donc aucune donnée.
+    missing_tools = [tool for tool in ('pg_dump', 'mongodump') if not shutil.which(tool)]
+    if missing_tools:
+        return jsonify({
+            'error': 'Outils de sauvegarde absents sur le serveur : ' + ', '.join(missing_tools),
+            'hint': 'Installer postgresql-client et mongodb-database-tools (voir docs/DEMARRAGE.md).'
+        }), 501
+
+    backup_dir = os.path.join(
+        Config.BACKUP_DIR, f"backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    )
     os.makedirs(backup_dir, exist_ok=True)
-    
-    # 1. Backup PostgreSQL
-    pg_dump_cmd = f"""
-        pg_dump -h {os.getenv('PG_HOST', 'localhost')} \
-                 -p {os.getenv('PG_PORT', '5435')} \
-                 -U {os.getenv('PG_USER', 'gbekoundb_user')} \
-                 -d {os.getenv('PG_DATABASE', 'gbekoundb')} \
-                 -F c -f {backup_dir}/postgresql_backup.dump
-    """
-    
-    # 2. Backup MongoDB
-    mongodump_cmd = f"""
-        mongodump --uri="{os.getenv('MONGO_URI', 'mongodb://localhost:27017/')}" \
-                  --out={backup_dir}/mongodb_backup
-    """
-    
-    # 3. Backup des fichiers uploadés
-    uploads_dir = "uploads"
-    if os.path.exists(uploads_dir):
-        shutil.copytree(uploads_dir, f"{backup_dir}/uploads")
-    
-    # Créer une archive
-    archive_name = f"{backup_dir}.tar.gz"
-    shutil.make_archive(backup_dir, 'gztar', backup_dir)
-    
-    # Nettoyer le dossier temporaire
-    shutil.rmtree(backup_dir)
-    
+
+    commands = {
+        'postgresql': [
+            'pg_dump',
+            '-h', Config.PG_HOST,
+            '-p', str(Config.PG_PORT),
+            '-U', Config.PG_USER,
+            '-d', Config.PG_DATABASE,
+            '-F', 'c',
+            '-f', os.path.join(backup_dir, 'postgresql_backup.dump'),
+        ],
+        'mongodb': [
+            'mongodump',
+            f'--uri={Config.MONGO_URI}',
+            f'--db={Config.MONGO_DB}',
+            f'--out={os.path.join(backup_dir, "mongodb_backup")}',
+        ],
+    }
+    # Le mot de passe passe par l'environnement, jamais dans la ligne de commande.
+    env = {**os.environ, 'PGPASSWORD': Config.PG_PASSWORD or ''}
+
+    try:
+        for name, command in commands.items():
+            completed = subprocess.run(
+                command, env=env, capture_output=True, text=True,
+                timeout=BACKUP_TIMEOUT_SECONDS,
+            )
+            if completed.returncode != 0:
+                logger.error('Backup %s échoué : %s', name, completed.stderr)
+                return jsonify({'error': f'Échec de la sauvegarde {name}'}), 500
+
+        uploads_dir = 'uploads'
+        if os.path.exists(uploads_dir):
+            shutil.copytree(uploads_dir, os.path.join(backup_dir, 'uploads'))
+
+        archive_name = shutil.make_archive(backup_dir, 'gztar', backup_dir)
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'La sauvegarde a dépassé le délai autorisé'}), 504
+    finally:
+        shutil.rmtree(backup_dir, ignore_errors=True)
+
     return jsonify({
         'message': 'Backup créé avec succès',
         'backup_file': archive_name,
@@ -493,7 +598,7 @@ def restore_backup():
     """
     Restaure un backup système
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     backup_file = data.get('backup_file')
     
     if not backup_file or not os.path.exists(backup_file):

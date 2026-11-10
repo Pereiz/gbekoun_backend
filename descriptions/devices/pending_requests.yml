@@ -1,0 +1,18 @@
+Demandes de connexion en attente (appelé par l'appareil ACTIF)
+À appeler à l'ouverture de l'appli, au cas où l'événement socket / la notification a été manqué.
+---
+tags:
+  - Appareils
+responses:
+  200:
+    description: Liste (vide le plus souvent)
+    schema:
+      type: array
+      items:
+        type: object
+        properties:
+          request_id: {type: string}
+          device_name: {type: string, example: "iPhone 13"}
+          platform: {type: string, example: ios}
+          requested_at: {type: string}
+          expires_at: {type: string}

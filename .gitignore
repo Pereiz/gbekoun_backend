@@ -1,131 +1,84 @@
-# Python
+# ---------- Python ----------
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
-venv/
-.venv/
-ENV/
-env.bak/
-venv.bak/
-pythonenv*
 
-# Virtual Environment (ton dossier .genv)
+# Environnements virtuels
 .genv/
 genv/
+venv/
 .venv/
+env/
+ENV/
 
-# IDE
+# ---------- IDE / OS ----------
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
+desktop.ini
 
-# Flask
-instance/
-.webassets-cache
+# ---------- Secrets (ne jamais versionner) ----------
 .env
-.env.local
-.env.*.local
-.flaskenv/
-.genv/
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pm2/
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-*.sql
-!migrations/001_push_devices.sql
-!setup_postgres_messaging.sql
-!gekoun_messages.js
-!init-mongo.js
-gbekoundb.sql
-render_db
-
-# Uploads
-uploads/
-media/
-static/uploads/
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.mp4
-*.mp3
-!uploads/.gitkeep
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-*.cover
-.hypothesis/
-
-# Docker
-.dockerignore
-docker-compose.override.yml
-docker-compose-dev.yml
-*.pid
-
-# Environment variables
-.env
-.env.production
-.env.staging
-.genv/
-
-# JWT and keys
+.env.*
+!.env.example
 *.pem
 *.key
 *.crt
 *.p12
 secrets/
 keys/
+render_db
 
-# OS
-Thumbs.db
-desktop.ini
+# ---------- Données locales ----------
+# Dumps et exports de base : ignorés, sauf les scripts du dossier database/
+*.sql
+*.dump
+!database/**/*.sql
+*.db
+*.sqlite
+*.sqlite3
+backups/
+uploads/
+media/
+static/uploads/
+!uploads/.gitkeep
 
-# Project specific
+# ---------- Logs / temporaires ----------
+logs/
+*.log
+*.pid
+*.tmp
+*.temp
+*.bak
+*.backup
+*.prof
+
+# ---------- Tests / cache ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+/tests/e2e/test_message_flow.py
+
+# ---------- Docker ----------
+docker-compose.override.yml
+docker-compose-dev.yml
+
+# ---------- Notes personnelles (hors projet) ----------
 note.odt
 commande.md
 Creation\ de\ conteneur.txt
 Liste_complete_urls.md
 ls.txt
 mongo_messages.md
-
-# Temporary files
-*.tmp
-*.temp
-*.bak
-*.backup
-
-# Documentation générée
-docs/_build/
-site/
-
-# Cache
-.cache/
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Profiling data
-*.prof
+rapport_claude.md
+Observations par rapport a l'application - 18 Oct 2026.pdf

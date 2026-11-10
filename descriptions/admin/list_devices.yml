@@ -1,0 +1,25 @@
+Appareils d'un utilisateur (actif + historique)
+---
+tags:
+  - Administration
+parameters:
+  - name: user_id
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Liste, l'appareil actif en premier
+    schema:
+      type: array
+      items:
+        type: object
+        properties:
+          device_id: {type: string}
+          device_name: {type: string}
+          platform: {type: string}
+          is_active: {type: boolean}
+          activated_at: {type: string}
+          last_seen_at: {type: string}
+          revoked_at: {type: string}
+          revoked_reason: {type: string, example: replaced_by_approval}

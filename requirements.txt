@@ -1,28 +1,22 @@
+# Web
 Flask==3.0.0
-gunicorn==23.0.0
-flask-socketio==5.3.4
-python-socketio==5.9.0
-eventlet==0.33.3          # Pour les WebSockets asynchrones
-
-psycopg2-binary==2.9.9    # Driver PostgreSQL
-pymongo==4.5.0            # Driver MongoDB
-
-PyJWT==2.8.0              # JSON Web Tokens
-bcrypt==4.1.2             # Hash des mots de passe (optionnel)
-
-twilio==8.10.0            # Pour envoyer des SMS (optionnel)
-
-python-dotenv==1.0.0      # Variables d'environnement
 flask-cors==6.0.5
 flasgger==0.9.7.1
+gunicorn==23.0.0
+
+# Temps réel (mode threading ; simple-websocket active le transport WebSocket)
+flask-socketio==5.3.4
+python-socketio==5.9.0
+simple-websocket==1.1.0
+
+# Bases de données
+psycopg2-binary==2.9.9
+pymongo==4.5.0
+dnspython==2.8.0          # requis pour les URI mongodb+srv:// (Atlas)
+
+# Sécurité / configuration
+PyJWT==2.8.0
+python-dotenv==1.0.0
+
+# Métriques admin
 psutil==7.2.2
-
-certifi>=2024.0.0
-
-#flask-cors
-#flasgger
-#psutil
-# pymongo[srv]==3.12
-#eventlet
-
-

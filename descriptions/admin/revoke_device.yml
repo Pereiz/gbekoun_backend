@@ -1,0 +1,20 @@
+Révoquer l'appareil actif d'un utilisateur (téléphone volé)
+Déconnexion immédiate. L'utilisateur devra activer son nouvel appareil avec un code admin.
+---
+tags:
+  - Administration
+parameters:
+  - name: user_id
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Appareil révoqué
+    schema:
+      type: object
+      properties:
+        user_id: {type: string}
+        revoked: {type: integer, example: 1}
+  404:
+    description: USER_NOT_FOUND

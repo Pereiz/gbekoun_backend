@@ -1,20 +1,35 @@
-Connexion simple par téléphone
+Connexion : numéro + secret de l'appareil enregistré
+Le numéro seul ne suffit plus. Si l'appareil n'est pas l'appareil actif du compte,
+la réponse 403 DEVICE_NOT_RECOGNIZED indique de lancer l'activation :
+has_active_device=true → proposer la validation par l'ancien appareil
+(POST /api/auth/device/requests) ou un code admin ; false → code admin uniquement.
 ---
 tags:
   - Authentification
+security: []
 parameters:
   - name: body
     in: body
     required: true
     schema:
       type: object
-      required:
-        - phone_number
+      required: [phone_number, device_secret]
       properties:
         phone_number:
           type: string
-          description: Numéro de téléphone
-          example: "0199013113"
+          example: "+22990123456"
+        device_secret:
+          type: string
+          description: "Clé secrète aléatoire générée par l'appli au 1er lancement (32 à 256 caractères), stockée dans le stockage sécurisé. Ne jamais l'afficher ni la logger."
+          example: "9f2c4e7a1b3d5f6e8a0c2e4f6a8b0d2e4f6a8c0e2a4c6e8f0a2c4e6a8c0e2f4a"
+        device_name:
+          type: string
+          description: Nom lisible de l'appareil (affiché sur l'ancien téléphone)
+          example: "Samsung Galaxy A15"
+        platform:
+          type: string
+          enum: [android, ios]
+          example: android
 responses:
   200:
     description: Connexion réussie
@@ -23,26 +38,53 @@ responses:
       properties:
         token:
           type: string
+          description: JWT lié à cet appareil (en-tête Authorization Bearer)
           example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
         user_id:
           type: string
           example: "550e8400-e29b-41d4-a716-446655440000"
+        device_id:
+          type: string
+          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
         display_name:
           type: string
-          example: "John Doe"
+          example: "Koffi"
+        username:
+          type: string
+          example: "koffi"
   400:
-    description: Téléphone requis
+    description: Champs manquants ou invalides (PHONE_REQUIRED, INVALID_DEVICE_SECRET, INVALID_PLATFORM)
     schema:
       type: object
       properties:
         error:
           type: string
-          example: "Téléphone requis"
+          example: "device_secret requis (32 à 256 caractères aléatoires)"
+        code:
+          type: string
+          example: INVALID_DEVICE_SECRET
+  403:
+    description: ACCOUNT_SUSPENDED, ou DEVICE_NOT_RECOGNIZED (appareil non autorisé)
+    schema:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Cet appareil n'est pas autorisé pour ce compte."
+        code:
+          type: string
+          example: DEVICE_NOT_RECOGNIZED
+        has_active_device:
+          type: boolean
+          example: true
   404:
-    description: Utilisateur non trouvé
+    description: Utilisateur non trouvé (USER_NOT_FOUND) → proposer l'inscription
     schema:
       type: object
       properties:
         error:
           type: string
           example: "Utilisateur non trouvé"
+        code:
+          type: string
+          example: USER_NOT_FOUND

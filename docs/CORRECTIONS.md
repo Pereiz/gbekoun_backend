@@ -1,0 +1,523 @@
+# Corrections et réorganisation du backend — 10 novembre 2026
+
+Ce document explique **ce qui a été changé, pourquoi, et où**. Il suit la
+numérotation de l'audit : points 2 à 13 (10/11/2026), puis point 1 —
+connexion liée à l'appareil (11/11/2026, voir
+[Point 1](#point-1--connexion-liée-à-lappareil-11112026)).
+
+> ⚠️ **Actions à faire de ton côté** avant/après le déploiement :
+> voir la section [Actions manuelles obligatoires](#actions-manuelles-obligatoires).
+
+---
+
+## Sommaire
+
+1. [Actions manuelles obligatoires](#actions-manuelles-obligatoires)
+2. [Les corrections, une par une (points 2 à 13)](#les-corrections-une-par-une)
+3. [Point 1 — connexion liée à l'appareil](#point-1--connexion-liée-à-lappareil-11112026)
+3. [Réorganisation du projet](#réorganisation-du-projet)
+4. [Fichiers supprimés](#fichiers-supprimés)
+5. [Petites corrections faites au passage](#petites-corrections-faites-au-passage)
+6. [Tests](#tests)
+7. [Changements visibles par l'application mobile](#changements-visibles-par-lapplication-mobile)
+8. [Reste à faire](#reste-à-faire)
+
+---
+
+## Actions manuelles obligatoires
+
+| # | Action | Pourquoi |
+|---|--------|----------|
+| A | **Changer le mot de passe PostgreSQL sur Render** (Dashboard → base → *Rotate password*), puis mettre à jour `PG_PASSWORD` dans les variables d'environnement du service. | Il était écrit en clair dans `docker-compose.yml` et se trouve **dans l'historique Git poussé sur GitHub** (commits `5e9e294`, `27c934b`). Le retirer du fichier ne suffit pas. |
+| B | Si le mot de passe `npg_…` présent dans l'ancien `gbekoundb.sql` est (ou a été) utilisé quelque part (Neon ?), le changer aussi. | Même raison : il est dans l'historique Git. |
+| C | Vérifier que **`SECRET_KEY`, `JWT_SECRET` et `PG_PASSWORD`** sont définis sur Render. | L'application **refuse désormais de démarrer** en production si l'un d'eux manque (point 5). Générer une valeur : `python -c "import secrets; print(secrets.token_hex(32))"`. |
+| D | Vérifier en prod s'il existe un utilisateur `+1234567890` admin, et le supprimer/rétrograder. | L'ancien script SQL créait cet **administrateur par défaut**. Comme la connexion se fait par numéro seul, n'importe qui pouvait se connecter en admin avec ce numéro. Requête : `SELECT id, is_admin FROM gbekoun.users WHERE phone_number = '+1234567890';` |
+| E | Vérifier l'index TTL MongoDB en prod : `db.messages.getIndexes()`. S'il y a `idx_ttl_timestamp`, **MongoDB supprime automatiquement tous les messages de plus d'un an**. Pour l'enlever : `db.messages.dropIndex("idx_ttl_timestamp")`. | L'ancien `gekoun_messages.js` le créait (commenté « optionnel » mais actif). Il n'est plus créé par le nouveau script. |
+| F | Si `JWT_SECRET` change sur Render, tous les utilisateurs devront se reconnecter. | Les anciens tokens signés avec l'ancien secret deviennent invalides. C'est voulu si l'ancien secret était une valeur par défaut. |
+
+Pour réécrire l'historique Git et effacer définitivement les secrets
+(`git filter-repo`), il faut le faire en connaissance de cause (force-push,
+clones existants) : ce n'est pas fait ici. La rotation des mots de passe
+(A, B) suffit à neutraliser la fuite.
+
+---
+
+## Les corrections, une par une
+
+### 2. Secrets en clair dans le dépôt
+
+**Problème.** `docker-compose.yml` contenait l'hôte et le mot de passe de la
+base Render de production. `gbekoundb.sql` contenait un autre mot de passe.
+
+**Correction.**
+- [docker-compose.yml](../docker-compose.yml) réécrit : **aucun secret**, tout
+  vient du fichier `.env` (non versionné). Il lance désormais un environnement
+  local complet (API + PostgreSQL + MongoDB) au lieu de pointer vers la prod.
+- `gbekoundb.sql` remplacé par [database/postgres/schema.sql](../database/postgres/schema.sql),
+  sans `CREATE USER ... PASSWORD`.
+- [.env.example](../.env.example) documente toutes les variables, sans valeur sensible.
+- [.gitignore](../.gitignore) : `.env.*`, `render_db`, `backups/`, `*.dump` sont ignorés.
+
+➡️ Voir aussi les actions manuelles A et B.
+
+### 3. Transfert de message sans contrôle d'accès
+
+**Problème.** `POST /api/messages/<conv>/messages/<id>/forward` ne vérifiait pas
+que l'utilisateur était membre de la conversation **d'origine**. Avec un
+identifiant de message, on pouvait le copier dans sa propre conversation et
+donc le lire.
+
+**Correction** ([blueprints/messages.py](../blueprints/messages.py), `forward_message`) :
+vérification `is_participant(conversation_id, user)` avant toute lecture du
+message source. Au passage, un message transféré :
+- met à jour le compteur de non-lus, `updated_at` et envoie la notification push
+  (il ne le faisait pas) ;
+- est diffusé en temps réel (`new_message`) dans la conversation cible.
+
+### 4. Comptes suspendus ou supprimés toujours actifs
+
+**Problème.** Un compte suspendu ou supprimé pouvait continuer à utiliser son
+token (valide 30 jours) et même se reconnecter.
+
+**Correction.**
+- [core/security.py](../core/security.py) — `require_auth` vérifie l'état du
+  compte à chaque requête : supprimé → `401`, suspendu → `403 Compte suspendu`.
+- `POST /api/auth/login` refuse les comptes supprimés (`404`) et suspendus (`403`).
+- La connexion Socket.IO est refusée pour ces comptes.
+- Quand un admin suspend, supprime un compte ou valide un signalement avec
+  suspension, et quand un utilisateur supprime son compte, **ses sockets
+  ouverts sont fermés immédiatement** (`core/realtime.disconnect_user`).
+
+### 5. Secrets par défaut faibles
+
+**Problème.** Sans variable d'environnement, `JWT_SECRET` valait
+`'jwt-secret-key'` : n'importe qui pouvait fabriquer un token valide pour
+n'importe quel utilisateur.
+
+**Correction** ([core/config.py](../core/config.py), `validate_config`) :
+- en production (`FLASK_DEBUG` absent ou `0`), l'application **refuse de
+  démarrer** si `SECRET_KEY`, `JWT_SECRET` ou `PG_PASSWORD` manque, avec un
+  message clair ;
+- en développement (`FLASK_DEBUG=1`), des valeurs de secours sont utilisées
+  avec un avertissement dans les logs ;
+- plus aucun mot de passe de base de données par défaut dans le code.
+
+### 6. Handlers Socket.IO écrasés
+
+**Problème.** `app.py` redéclarait `connect`, `disconnect`, `typing` et
+`mark_read` **après** avoir importé `sockets/events.py`. Avec Socket.IO, c'est
+la dernière déclaration qui gagne (vérifié par un test). Conséquences :
+- à la connexion, l'utilisateur rejoignait les rooms de **toutes** ses
+  conversations, y compris les groupes quittés ou dont il avait été retiré :
+  il continuait à recevoir les messages en temps réel ;
+- les événements de présence `user_presence` n'étaient jamais envoyés ;
+- `typing` / `mark_read` n'avaient aucun contrôle d'appartenance.
+
+**Correction.**
+- Tous les événements Socket.IO sont **uniquement** dans
+  [sockets/events.py](../sockets/events.py). `app.py` ne fait que l'importer.
+- À la connexion : seulement les conversations où `deleted_at IS NULL`.
+- La présence (`user_presence`) est envoyée à la première connexion et à la
+  dernière déconnexion d'un utilisateur (plusieurs appareils gérés).
+- `typing` et `mark_read` ne sont acceptés que si le socket est dans la room
+  de la conversation (donc membre actif) — sans requête SQL supplémentaire.
+- `mark_read` valide l'ID de message (avant : exception si ID invalide).
+- Les rooms sont maintenues à jour depuis l'API REST
+  ([core/realtime.py](../core/realtime.py)) :
+  - création de groupe, ajout de participant → les sockets des membres
+    rejoignent la room immédiatement ;
+  - retrait d'un participant, départ d'un groupe, suppression d'une
+    conversation → les sockets quittent la room immédiatement.
+- Le suivi des connexions (`sid` ↔ utilisateur) est protégé par un verrou
+  (accès concurrents avec `--threads 100`).
+
+### 7. Réactions par socket toujours en erreur
+
+**Problème.** L'événement `react` faisait `$pull` et `$push` sur le champ
+`reactions` dans la **même** requête : MongoDB refuse (« would create a
+conflict »). Aucune réaction par socket ne fonctionnait.
+
+**Correction.** Nouvelle fonction `set_user_reaction` dans
+[utils/message_helpers.py](../utils/message_helpers.py) (pipeline d'agrégation,
+une seule opération atomique), utilisée par la route REST **et** par le socket.
+Les événements `react` / `remove_reaction` vérifient aussi désormais que
+l'utilisateur est membre de la conversation (avant : n'importe qui pouvait
+réagir à n'importe quel message), et on ne peut plus réagir à un message
+supprimé.
+
+### 8. Connexions PostgreSQL « empoisonnées »
+
+**Problème.** `execute_query` ne faisait jamais de `rollback`. Après une
+erreur SQL, la connexion retournait au pool dans l'état *transaction aborted* :
+toutes les requêtes suivantes tombant sur cette connexion échouaient
+(`current transaction is aborted…`) jusqu'au redémarrage.
+
+**Correction** ([core/database.py](../core/database.py)) :
+- nouveau gestionnaire `transaction()` : `commit` si tout passe, `rollback`
+  sinon, et la connexion est toujours rendue au pool (fermée si elle est cassée) ;
+- `execute_query` l'utilise ;
+- le pool est créé à la première requête (l'import de l'app ne nécessite plus
+  de base démarrée, ce qui permet de lancer les tests sans base).
+
+### 9. `GET /api/auth/invite-codes?include_used=false` → erreur SQL
+
+**Problème.** Il manquait un espace : la requête générée contenait
+`... IS NULLORDER BY ...`.
+
+**Correction** ([blueprints/auth.py](../blueprints/auth.py), `list_invite_codes`) :
+`" ORDER BY ..."` avec l'espace. Les paramètres `count` / `expires_days` de la
+génération de codes sont aussi validés (avant : un texte provoquait une erreur 500).
+
+### 10. La mise en sourdine empêchait d'envoyer
+
+**Problème.** Mettre une conversation en sourdine bloquait **l'envoi** de
+messages (`403 Conversation en sourdine`). Une sourdine ne doit couper que les
+notifications reçues.
+
+**Correction.** Le contrôle est retiré de l'envoi (REST et socket). Les
+notifications push ignoraient déjà les membres en sourdine
+([core/notifications.py](../core/notifications.py)) : c'est le seul effet de la
+sourdine, comme sur les messageries habituelles.
+
+### 11. Supprimer une discussion directe la cassait en deux
+
+**Problème.** Après « Supprimer la conversation », `create_direct` créait une
+**nouvelle** conversation avec le même contact, tandis que le contact
+continuait d'écrire dans l'ancienne, devenue invisible : ses messages étaient
+perdus pour l'utilisateur.
+
+**Correction** (comportement type WhatsApp) :
+- **Suppression** ([blueprints/conversations.py](../blueprints/conversations.py),
+  `delete_conversation`) : l'historique est effacé **pour l'utilisateur seul**
+  (`deleted_for`), la conversation disparaît de sa liste, ses sockets quittent la room.
+- **Nouveau message dans une discussion directe** ([services/messaging.py](../services/messaging.py),
+  `after_message_created`) : la conversation **réapparaît** chez celui qui
+  l'avait supprimée (vide de l'ancien historique), et ses appareils connectés
+  rejoignent la room pour recevoir ce message.
+- **`POST /api/conversations/direct`** retrouve la conversation existante du
+  duo même si l'un des deux l'a supprimée (et la réactive pour celui qui la
+  rouvre). Il ne peut donc plus y avoir deux conversations directes pour le même duo.
+- On ne peut plus créer de conversation directe avec soi-même (avant : erreur 500).
+- Les groupes ne sont **pas** concernés par la réactivation : un membre parti
+  ou retiré ne revient pas tout seul.
+
+### 12. Le backup ne sauvegardait pas les bases
+
+**Problème.** `POST /api/admin/backup/create` construisait les commandes
+`pg_dump` et `mongodump` mais **ne les exécutait jamais** : l'archive ne
+contenait que le dossier `uploads`, tout en répondant « Backup créé avec succès ».
+
+**Correction** ([blueprints/admin.py](../blueprints/admin.py), `create_backup`) :
+- les commandes sont réellement exécutées (`subprocess.run`, sans shell,
+  délai max 15 min) ;
+- le mot de passe PostgreSQL passe par la variable `PGPASSWORD`, jamais dans
+  la ligne de commande ;
+- si `pg_dump` / `mongodump` ne sont pas installés sur le serveur, la route
+  répond **`501`** avec un message explicite au lieu de faire semblant ;
+- en cas d'échec : `500` (détail dans les logs), dossier temporaire nettoyé.
+
+> L'image Docker de production n'embarque pas ces outils. Sur Render, les
+> sauvegardes automatiques de la base managée sont de toute façon préférables.
+
+### 13. Inscription et création de groupe non atomiques
+
+**Problème.**
+- Inscription : le code d'invitation était vérifié, puis l'utilisateur créé,
+  puis le code marqué utilisé, en 3 requêtes séparées. Deux inscriptions
+  simultanées pouvaient utiliser le même code ; une erreur au milieu laissait
+  un compte créé sans code consommé.
+- Création de groupe : un numéro en double (ou son propre numéro) dans la
+  liste provoquait une erreur au milieu, laissant un groupe à moitié créé.
+
+**Correction.**
+- [blueprints/auth.py](../blueprints/auth.py), `register` : création du compte
+  et consommation du code dans **une seule transaction**. Le code est réservé
+  par un `UPDATE ... WHERE used_by IS NULL AND expires_at > NOW() RETURNING`
+  : un seul des deux gagne, l'autre reçoit `403` et son compte n'est pas créé.
+  Un numéro ou un nom d'utilisateur déjà pris renvoie `409`.
+- [blueprints/conversations.py](../blueprints/conversations.py), `create_group` :
+  tout dans une transaction, participants dédoublonnés, recherche des numéros
+  en une seule requête (avant : une requête par numéro).
+
+---
+
+## Point 1 — connexion liée à l'appareil (11/11/2026)
+
+**Problème.** `POST /api/auth/login` ne demandait que le numéro de téléphone :
+n'importe qui connaissant un numéro (et la recherche d'utilisateurs les
+affiche) obtenait un token valable 30 jours. Pas d'accès à un service SMS/OTP.
+
+**Solution retenue : un seul appareil autorisé par compte.**
+
+| Situation | Ce qui se passe |
+|-----------|-----------------|
+| Inscription | Le code d'invitation sert aussi d'activation : l'appareil utilisé devient l'appareil du compte. |
+| Connexion | Numéro **+ secret de l'appareil**. Un autre appareil reçoit `403 DEVICE_NOT_RECOGNIZED`. |
+| Changement de téléphone, ancien disponible | Le nouveau demande l'accord ; l'ancien reçoit une notification « Autoriser la connexion sur iPhone 13 ? » et accepte ou refuse. |
+| Téléphone perdu / cassé | L'admin génère un **code d'activation** (8 caractères, usage unique, 30 min, 5 essais) et le transmet par un canal sûr. |
+| Téléphone volé | L'admin **révoque** l'appareil : déconnexion immédiate. Puis code admin pour le nouveau. |
+
+Dans tous les cas, dès qu'un nouvel appareil est activé, **l'ancien est
+déconnecté immédiatement** : son token est refusé (`401 DEVICE_REVOKED`), ses
+sockets sont fermés, ses jetons de notification push sont désactivés.
+
+**Comment c'est sécurisé.**
+- Le « device » n'est pas un identifiant matériel (copiable) mais une **clé
+  secrète aléatoire** générée par l'appli et gardée dans le stockage sécurisé
+  du téléphone. Le serveur n'en garde que l'empreinte SHA-256.
+- Le token JWT contient l'identifiant de l'appareil (`did`). `require_auth` et
+  la connexion Socket.IO vérifient à chaque fois que c'est **toujours**
+  l'appareil actif (dans la même requête SQL que le contrôle suspendu/supprimé).
+- La base de données garantit elle-même « un seul appareil actif par compte »
+  (index unique partiel), même en cas de requêtes simultanées.
+- Codes admin : stockés sous forme d'empreinte, usage unique, 30 minutes,
+  5 essais, un nouveau code annule le précédent.
+- Demandes de validation : 10 minutes, une seule en attente (la nouvelle
+  remplace l'ancienne), 5 par heure maximum — pour qu'un inconnu ne puisse pas
+  harceler le titulaire de demandes jusqu'à ce qu'il accepte par erreur.
+  Seul l'appareil qui a fait la demande peut en consulter l'état (même secret).
+
+**Limites connues.**
+- Désinstaller l'appli (ou réinitialiser le téléphone) efface la clé : la
+  réinstallation compte comme un nouvel appareil. Comme l'ancienne
+  installation n'existe plus pour donner son accord, il faut un **code admin**.
+- Le maillon faible devient l'admin : quelqu'un peut l'appeler en se faisant
+  passer pour un utilisateur. Règle à appliquer : **ne donner un code qu'en
+  personne, ou en rappelant soi-même le numéro du compte**.
+- La recherche d'utilisateurs expose toujours les numéros (vie privée), mais
+  ce n'est plus suffisant pour prendre un compte.
+
+**Fichiers.**
+
+| Fichier | Rôle |
+|---------|------|
+| [services/devices.py](../services/devices.py) | Secrets, codes, remplacement d'appareil, révocation |
+| [blueprints/devices.py](../blueprints/devices.py) | Routes `/api/auth/device/...` (activation, demandes, approbation) |
+| [blueprints/auth.py](../blueprints/auth.py) | `register` enregistre l'appareil, `login` exige le secret |
+| [blueprints/admin.py](../blueprints/admin.py) | Code d'activation, liste et révocation des appareils |
+| [core/security.py](../core/security.py) | Token lié à l'appareil, contrôle à chaque requête |
+| [core/http.py](../core/http.py) | Format d'erreur commun `{"error", "code"}` |
+| [core/realtime.py](../core/realtime.py) | `disconnect_device` (room `device_<id>`) |
+| [core/notifications.py](../core/notifications.py) | Push « Nouvelle connexion » |
+| [database/migrations/002_user_devices.sql](../database/migrations/002_user_devices.sql) | Tables `user_devices`, `device_activation_codes`, `device_approval_requests` (aussi dans `schema.sql`) |
+| [scripts/create_admin.py](../scripts/create_admin.py) | Affiche désormais un code d'activation (24 h) pour le premier appareil de l'admin, et la base visée |
+| `descriptions/devices/*.yml`, `descriptions/admin/*.yml` | Documentation Swagger des nouvelles routes |
+
+**Nouvelles routes.**
+
+| Méthode | Route | Appelée par |
+|---------|-------|-------------|
+| POST | `/api/auth/device/activate` | nouvel appareil (code admin) |
+| POST | `/api/auth/device/requests` | nouvel appareil (demande d'accord) |
+| POST | `/api/auth/device/requests/<id>/status` | nouvel appareil (attente) |
+| GET | `/api/auth/device/requests/pending` | appareil actif |
+| POST | `/api/auth/device/requests/<id>/approve` | appareil actif |
+| POST | `/api/auth/device/requests/<id>/reject` | appareil actif |
+| GET | `/api/auth/device` | appareil actif (infos) |
+| POST | `/api/admin/users/<id>/activation-code` | admin |
+| GET | `/api/admin/users/<id>/devices` | admin |
+| POST | `/api/admin/users/<id>/devices/revoke` | admin |
+
+Nouvel événement Socket.IO : `device_approval_requested` (vers l'appareil actif).
+Toutes les erreurs d'authentification portent désormais un `code`
+(`TOKEN_MISSING`, `TOKEN_INVALID`, `ACCOUNT_NOT_FOUND`, `ACCOUNT_SUSPENDED`,
+`DEVICE_REVOKED`, `DEVICE_NOT_RECOGNIZED`, `INVALID_ACTIVATION_CODE`…).
+
+**Tests.** 16 tests unitaires (dont 3 nouveaux), et un scénario réel sur
+conteneurs PostgreSQL/MongoDB jetables : **42/42 vérifications réussies**
+(premier admin via le script, inscription, connexion refusée sur un autre
+appareil, validation par l'ancien appareil avec notification temps réel,
+refus, remplacement de demande, limite 5/heure, code admin, 5 essais, même
+code utilisé en parallèle par 2 appareils → un seul succès, révocation,
+désactivation des jetons push, messagerie temps réel avec les nouveaux tokens).
+Logs serveur : aucune erreur.
+
+> ⚠️ **Changement cassant pour l'appli mobile** : `register` et `login`
+> exigent `device_secret`, et les anciens tokens (sans appareil) sont refusés.
+> L'application doit être mise à jour en même temps que le backend
+> (sans impact sur des utilisateurs : rien n'est encore déployé).
+
+---
+
+## Réorganisation du projet
+
+Avant, `app.py` faisait tout (config, pool PostgreSQL, Mongo, JWT, push,
+Socket.IO…) et chaque blueprint faisait `from app import ...`, ce qui créait
+des imports circulaires. La logique d'envoi de message était copiée-collée
+entre la route REST et le socket.
+
+```
+gbekoun_backend/
+├── app.py                  # Point d'entrée : crée l'app, enregistre les routes et les sockets
+├── core/                   # Briques techniques partagées
+│   ├── config.py           #   Variables d'environnement + validation au démarrage
+│   ├── database.py         #   Pool PostgreSQL (transaction, execute_query) + MongoDB
+│   ├── security.py         #   JWT, require_auth, require_admin
+│   ├── extensions.py       #   Instance Socket.IO
+│   ├── realtime.py         #   Rooms Socket.IO pilotées depuis le REST (join/leave/disconnect)
+│   └── notifications.py    #   Notifications push Expo
+├── services/
+│   └── messaging.py        # Envoi de message (commun REST + socket)
+├── blueprints/             # Routes REST (auth, conversations, messages, users, status, admin, utils)
+├── sockets/events.py       # TOUS les événements Socket.IO
+├── utils/                  # expo_push.py, message_helpers.py
+├── descriptions/           # Documentation Swagger (YAML) des routes
+├── database/
+│   ├── postgres/schema.sql #   Schéma complet, idempotent
+│   ├── mongo/init.js       #   Collections, validation, index
+│   └── migrations/         #   Migrations incrémentales (001_push_devices.sql)
+├── scripts/create_admin.py # Création du premier administrateur
+├── tests/e2e/              # Tests (sans base de données)
+├── docs/                   # CORRECTIONS.md (ce fichier), DEMARRAGE.md
+├── Dockerfile              # Image de production (Render)
+└── docker-compose.yml      # Environnement local complet
+```
+
+Les URL de l'API, les noms d'événements Socket.IO et les formats de réponse
+**n'ont pas changé** (sauf ce qui est listé dans
+[Changements visibles](#changements-visibles-par-lapplication-mobile)).
+La commande de démarrage en production (`gunicorn ... app:app`) est identique.
+
+---
+
+## Fichiers supprimés
+
+**Code mort (jamais importé, et souvent cassé)** — supprimés de Git :
+
+| Fichier | Raison |
+|---------|--------|
+| `config.py` | Doublon de la config, jamais utilisé (`from app.config` n'existait pas). Remplacé par `core/config.py`. |
+| `db/mongo_conn.py`, `db/pg_conn.py` | Jamais importés, imports cassés (`app.config`). |
+| `middleware/auth.py` | Jamais importé, import cassé. Remplacé par `core/security.py`. |
+| `utils/jwt-utils.py` | Jamais importé (et non importable : tiret dans le nom). |
+| `utils/validators.py`, `workers/tasks.py`, `blueprints/media.py` | Fichiers vides. |
+| `entrypoint.sh` | Désactivé dans le Dockerfile, contenait un mot de passe Mongo. |
+| `gbekoundb.sql` | Remplacé par `database/postgres/schema.sql` (l'ancien échouait sous Docker : index créés deux fois ; contenait un mot de passe et l'admin `+1234567890`). |
+| `gekoun_messages.js` | Remplacé par `database/mongo/init.js` (`use` ne fonctionne pas dans un script Docker ; mot de passe en dur ; index TTL). |
+| `migrations/` | Déplacé dans `database/migrations/`. |
+
+**Dépendances retirées de `requirements.txt`** : `eventlet` (non utilisé, le
+mode est `threading`), `twilio`, `bcrypt` (jamais importés), `certifi` (n'était
+plus utilisé depuis le retrait de `tlsCAFile`). Ajout explicite de
+`simple-websocket` (transport WebSocket en mode threading) et `dnspython`
+(URI `mongodb+srv://` d'Atlas) qui étaient déjà installés en dépendances indirectes.
+
+**Dossiers vides appartenant à root** : `setup_postgres_messaging.sql/` et
+`init-mongo.js/` étaient des **dossiers** (Docker les avait créés en montant
+des fichiers inexistants). Supprimés.
+
+**Non supprimés (fichiers personnels, non versionnés)** — à toi de décider :
+`note.odt`, `commande.md`, `ls.txt`, `Liste_complete_urls.md`,
+`mongo_messages.md`, `Creation de conteneur.txt`, `gbekoundb2.sql`,
+`docker-compose-dev.yml`, le PDF d'observations, et **`render_db`** (contient
+les identifiants Render en clair : à supprimer après la rotation du mot de passe).
+Le dossier `uploads/` appartient à root (créé par Docker) ; il est ignoré par Git.
+
+**Autres fichiers modifiés** : `Dockerfile` (plus de `gcc`/`g++`/`curl` inutiles,
+logs non bufferisés), `.dockerignore` (désormais versionné pour que Render
+l'utilise ; exclut secrets, tests, docs), `.gitignore` (nettoyé, doublons retirés).
+
+---
+
+## Petites corrections faites au passage
+
+Dans les fichiers déjà modifiés pour les points ci-dessus :
+
+- **Recherche de messages** : le texte cherché est échappé (`re.escape`). Avant,
+  taper `(` ou `*` provoquait une erreur 500, et une regex piégée pouvait
+  surcharger MongoDB.
+- **IDs invalides** (`before_id`, `message_id`) : réponse `400` au lieu de `500`.
+- **`limit`** plafonné à 200 sur les routes de messages (valeur annoncée par `/api/config`).
+- **Corps JSON absent** : toutes les routes acceptent un corps vide sans
+  planter (`request.get_json(silent=True) or {}`).
+- **Type de message** validé (`text`, `image`, `video`, `audio`, `file`,
+  `location`, `contact`) : avant, un type inconnu était rejeté par MongoDB → 500.
+- **Compteur de non-lus** : n'augmente plus pour les membres qui ont quitté la conversation.
+- **Suppression REST** : `result.deleted_count` (inexistant sur un `UpdateResult`) retiré.
+- **Retrait / départ d'un groupe** : le rôle d'admin du groupe est retiré
+  (sinon il revenait en cas de réintégration).
+- `print(conversation_id)` de débogage retiré de `get_conversation`.
+- Les erreurs du thread de nettoyage des utilisateurs inactifs sont journalisées
+  au lieu de tuer le thread silencieusement.
+
+---
+
+## Tests
+
+[tests/e2e/test_message_flow.py](../tests/e2e/test_message_flow.py) : 13 tests,
+sans base de données (PostgreSQL et MongoDB simulés en mémoire). En plus des 3
+tests existants, ajout de tests pour les points 3, 4, 6, 7, 9, 10 et le
+compteur de non-lus.
+
+```bash
+FLASK_DEBUG=1 .genv/bin/python tests/e2e/test_message_flow.py -v
+```
+
+Le fichier reste ignoré par Git (choix existant dans `.gitignore`).
+
+> Note : avec Flask-SocketIO 5.3.4 + python-socketio 5.9, le client de test
+> Socket.IO ne reçoit pas les événements (`get_received()` reste vide —
+> incompatibilité connue, corrigée dans Flask-SocketIO 5.3.5+). Les tests
+> interceptent donc `emit()`. Cela n'affecte pas le fonctionnement réel.
+
+### Test sur de vraies bases (conteneurs jetables `postgres:15-alpine` + `mongo:6.0`)
+
+- `database/postgres/schema.sql` : appliqué sur une base vide **puis rejoué une
+  2e fois** sans erreur (idempotent) → 8 tables créées.
+- `database/mongo/init.js` : collection `messages` + validateur + 3 index (pas d'index TTL), rejoué sans erreur.
+- `scripts/create_admin.py` : crée l'admin, puis le relancer le « promeut » sans créer de doublon.
+- Démarrage en mode production sans `SECRET_KEY`/`JWT_SECRET`/`PG_PASSWORD` → refus avec message clair.
+- API réelle (`FLASK_DEBUG=0`) + vrais clients Socket.IO : **29/29 vérifications réussies** :
+
+| Point | Vérification |
+|-------|--------------|
+| 3 | Transfert depuis une conversation étrangère → 403 ; transfert légitime OK |
+| 4 | Suspension : socket fermé immédiatement, REST 403, login 403 ; compte supprimé : 401 / login 404 |
+| 6 | Présence en ligne / hors ligne reçue ; membre retiré : ne reçoit plus les messages ni les « typing » |
+| 7 | Réaction par socket enregistrée, puis remplacée |
+| 8 | 15 erreurs SQL d'affilée (plus que la taille du pool), puis 15 requêtes normales : toutes OK |
+| 9 | `GET /invite-codes?include_used=false` → 200 |
+| 10 | Envoi dans une conversation en sourdine → 201 |
+| 11 | Conversation supprimée → disparaît ; nouveau message → réapparaît avec seulement le nouveau message ; `POST /direct` renvoie la même ; conversation avec soi-même → 400 |
+| 12 | Backup sans `mongodump` installé → 501 explicite |
+| 13 | 2 inscriptions **simultanées** avec le même code → un seul succès ; numéro déjà pris → 409 sans consommer le code ; groupe avec doublons → OK |
+| — | Recherche avec `(` → 200 |
+
+---
+
+## Changements visibles par l'application mobile
+
+| Avant | Maintenant |
+|-------|-----------|
+| Envoyer dans une conversation en sourdine → `403` / erreur socket `MUTED` | L'envoi fonctionne (seules les notifications reçues sont coupées). |
+| Compte suspendu : tout fonctionnait | `403 {"error": "Compte suspendu"}` sur toutes les routes ; socket refusé. |
+| Compte supprimé : tout fonctionnait | `401` ; connexion `404`. |
+| Supprimer une conversation : les messages restaient | L'historique est effacé pour l'utilisateur ; une discussion directe réapparaît au prochain message. |
+| `POST /direct` après suppression : nouvelle conversation | Renvoie la conversation existante (`200`, `existing: true`). |
+| Message transféré : pas d'événement temps réel | `new_message` émis dans la conversation cible (l'expéditeur le reçoit aussi sur ses appareils). |
+| Socket `react` : ne marchait pas | Fonctionne ; événement `reaction_added`. |
+| Socket : erreurs sur ID invalide parfois silencieuses | Événement `error` avec `code` (`INVALID_ID`, `FORBIDDEN`, `NOT_FOUND`…). |
+| Présence `user_presence` : jamais envoyée | Envoyée aux contacts à la connexion / déconnexion. |
+
+---
+
+## Reste à faire
+
+Non traités volontairement (hors du périmètre 2 à 13) :
+
+1. ~~Point 1 — connexion sans vérification~~ : **traité** (connexion liée à
+   l'appareil, voir plus haut). Reste : la recherche d'utilisateurs expose
+   les numéros de tout le monde avec 2 caractères (vie privée).
+2. `/api/echo` renvoie tous les en-têtes reçus (dont `Authorization`) et
+   `/api/health` expose le texte des erreurs de base de données : à restreindre
+   ou supprimer en production.
+3. Les messages envoyés par la route REST (secours) ne sont pas diffusés en
+   temps réel aux autres participants (seulement la notification push).
+4. « Supprimer » un groupe = le quitter sans les contrôles de `leave` (le dernier
+   admin peut partir et laisser le groupe sans admin).
+5. Aucune route d'upload (photo de profil, médias) — cf. PDF d'observations.
+6. Les messages ne contiennent que `sender_id` ; pour les groupes, ajouter le
+   nom de l'expéditeur simplifierait l'affichage (cf. PDF d'observations).
+7. Confidentialité : `privacy_about` et le réglage « contacts » pour la photo
+   ne sont pas appliqués.
+8. Mettre à jour Flask-SocketIO (5.3.4 → 5.3.6+) pour retrouver un client de test fonctionnel.

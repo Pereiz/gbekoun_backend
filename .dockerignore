@@ -1,0 +1,50 @@
+# Ce qui n'a rien à faire dans l'image Docker
+
+# Git / Docker
+.git/
+.gitignore
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+# Python / environnements
+__pycache__/
+*.py[cod]
+.genv/
+genv/
+venv/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets : les variables sont fournies par l'hébergeur ou docker-compose
+.env
+.env.*
+!.env.example
+render_db
+*.pem
+*.key
+*.crt
+secrets/
+
+# Données locales
+uploads/
+backups/
+*.dump
+*.log
+
+# Tests, docs et notes
+tests/
+docs/
+*.md
+!README.md
+*.pdf
+*.odt
+*.txt
+!requirements.txt
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

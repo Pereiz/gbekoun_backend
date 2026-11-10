@@ -1,0 +1,17 @@
+Appareil actif (celui du token)
+---
+tags:
+  - Appareils
+responses:
+  200:
+    description: Appareil courant
+    schema:
+      type: object
+      properties:
+        device_id: {type: string}
+        device_name: {type: string, example: "Samsung Galaxy A15"}
+        platform: {type: string, example: android}
+        activated_at: {type: string, example: "2026-11-11T09:12:00.000Z"}
+        last_seen_at: {type: string, example: "2026-11-11T10:30:00.000Z"}
+  401:
+    description: DEVICE_REVOKED (appareil remplacé) ou token invalide

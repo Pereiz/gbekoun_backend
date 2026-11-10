@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify
 from flasgger import swag_from
 from psycopg2 import sql
-from app import socketio
+from core.database import execute_query, mongo_client
 
 utils_bp = Blueprint('utils', __name__, url_prefix='/api')
 
@@ -99,7 +99,6 @@ def health_check():
     
     # Vérifier PostgreSQL
     try:
-        from app import execute_query
         result = execute_query(sql.SQL("""SELECT 1 as connected"""), fetch_one=True)
         status['services']['postgresql'] = {
             'status': 'up' if result and result.get('connected') == 1 else 'down',
@@ -114,7 +113,6 @@ def health_check():
     
     # Vérifier MongoDB
     try:
-        from app import mongo_client
         mongo_client.admin.command('ping')
         status['services']['mongodb'] = {
             'status': 'up',
@@ -127,19 +125,11 @@ def health_check():
         }
         status['status'] = 'degraded'
     
-    # Vérifier WebSocket
-    try:
-        from app import socketio
-        status['services']['websocket'] = {
-            'status': 'up',
-            'message': 'SocketIO ready'
-        }
-    except Exception as e:
-        status['services']['websocket'] = {
-            'status': 'down',
-            'message': str(e)
-        }
-        status['status'] = 'degraded'
+    # WebSocket : servi par le même process que l'API
+    status['services']['websocket'] = {
+        'status': 'up',
+        'message': 'SocketIO ready'
+    }
     
     # Vérifier l'espace disque (optionnel)
     try:
@@ -248,7 +238,7 @@ def validate_phone():
     """
     Valide le format d'un numéro de téléphone
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     phone = data.get('phone') if data else None
     
     if not phone:
@@ -327,6 +317,7 @@ def websocket_info():
                 'reaction_added',
                 'reaction_removed',
                 'user_presence',
+                'device_approval_requested',
                 'pong',
                 'error'
             ]

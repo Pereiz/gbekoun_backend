@@ -1,0 +1,59 @@
+Demander à l'appareil actif d'autoriser ce nouvel appareil
+L'appareil actif reçoit l'événement Socket.IO `device_approval_requested` et une notification
+push (data.type = "device_approval"). Ensuite, interroger
+POST /api/auth/device/requests/{request_id}/status toutes les 2 à 3 secondes.
+Une seule demande en attente à la fois (une nouvelle remplace la précédente), 5 demandes
+par heure maximum, validité 10 minutes.
+---
+tags:
+  - Appareils
+security: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required: [phone_number, device_secret]
+      properties:
+        phone_number:
+          type: string
+          example: "+22990123456"
+        device_secret:
+          type: string
+          description: "Clé secrète aléatoire générée par l'appli au 1er lancement (32 à 256 caractères), stockée dans le stockage sécurisé. Ne jamais l'afficher ni la logger."
+          example: "9f2c4e7a1b3d5f6e8a0c2e4f6a8b0d2e4f6a8c0e2a4c6e8f0a2c4e6a8c0e2f4a"
+        device_name:
+          type: string
+          description: Nom lisible de l'appareil (affiché sur l'ancien téléphone)
+          example: "Samsung Galaxy A15"
+        platform:
+          type: string
+          enum: [android, ios]
+          example: android
+responses:
+  201:
+    description: Demande créée
+    schema:
+      type: object
+      properties:
+        request_id: {type: string}
+        status: {type: string, example: pending}
+        expires_at: {type: string, example: "2026-11-11T10:40:00.000Z"}
+  403:
+    description: ACCOUNT_SUSPENDED
+  404:
+    description: USER_NOT_FOUND
+  409:
+    description: NO_ACTIVE_DEVICE (aucun appareil pour valider → code admin) ou DEVICE_ALREADY_ACTIVE (se connecter normalement)
+    schema:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Aucun appareil actif pour valider. Demandez un code à l'administrateur."
+        code:
+          type: string
+          example: NO_ACTIVE_DEVICE
+  429:
+    description: TOO_MANY_REQUESTS
