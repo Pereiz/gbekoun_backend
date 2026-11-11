@@ -39,9 +39,9 @@ def get_config():
             'offline_timeout_seconds': 60
         },
         'features': {
-            'voice_messages': True,
+            'voice_messages': False,
             'video_calls': False,
-            'file_sharing': True,
+            'file_sharing': False,
             'location_sharing': True,
             'contact_sharing': True,
             'group_calls': False,

@@ -6,8 +6,12 @@ from core.notifications import notify_new_message
 from core.realtime import join_users_to_conversation
 from utils.message_helpers import validate_reply_to
 
-# Doit rester aligné avec le validateur MongoDB (database/mongo/init.js).
-MESSAGE_TYPES = ('text', 'image', 'video', 'audio', 'file', 'location', 'contact')
+# Types acceptés à l'envoi. Les médias (image, video, audio, file) ne sont pas
+# encore pris en charge (pas d'upload) : sans cette restriction, un client
+# pourrait envoyer un « média » pointant vers n'importe quelle URL externe.
+# Le validateur MongoDB (database/mongo/init.js) connaît déjà tous les types.
+MESSAGE_TYPES = ('text', 'location', 'contact')
+MEDIA_TYPES = ('image', 'video', 'audio', 'file')
 
 
 class MessageError(Exception):
@@ -35,11 +39,13 @@ def after_message_created(conversation_id, sender_id, message_id):
     revived = execute_query("""
         UPDATE gbekoun.conversation_participants cp
         SET deleted_at = NULL, unread_count = 0
-        FROM gbekoun.conversations c
+        FROM gbekoun.conversations c, gbekoun.users u
         WHERE c.id = cp.conversation_id
+          AND u.id = cp.user_id
           AND c.type = 'direct'
           AND cp.conversation_id = %s
           AND cp.deleted_at IS NOT NULL
+          AND u.deleted_at IS NULL           -- jamais pour un compte supprimé
         RETURNING cp.user_id
     """, (conversation_id,), fetch_all=True)
     if revived:
@@ -69,6 +75,8 @@ def create_message(conversation_id, sender_id, msg_type, content, reply_to_id=No
         raise MessageError('INVALID_DATA', 'conversation_id requis')
     if not isinstance(content, str) or not content:
         raise MessageError('INVALID_DATA', 'Contenu du message requis')
+    if msg_type in MEDIA_TYPES:
+        raise MessageError('MEDIA_NOT_SUPPORTED', 'L\'envoi de médias n\'est pas encore disponible')
     if msg_type not in MESSAGE_TYPES:
         raise MessageError('INVALID_DATA', 'Type de message invalide')
 
@@ -99,3 +107,38 @@ def create_message(conversation_id, sender_id, msg_type, content, reply_to_id=No
 
     after_message_created(conversation_id, sender_id, str(result.inserted_id))
     return message
+
+
+DELETED_ACCOUNT_NAME = 'Compte supprimé'
+
+
+def attach_senders(messages):
+    """Ajoute `sender` = {id, display_name, avatar_url} à chaque message (sur place).
+
+    Une seule requête pour toute la liste. Le nom est lu au moment de
+    l'affichage : un changement de nom se voit aussi sur les anciens messages.
+    Accepte un message seul ou une liste ; retourne la même valeur.
+    """
+    items = messages if isinstance(messages, list) else [messages]
+    sender_ids = sorted({str(m['sender_id']) for m in items if m and m.get('sender_id')})
+    if not sender_ids:
+        return messages
+
+    rows = execute_query("""
+        SELECT id::text AS id, display_name, avatar_url, deleted_at
+        FROM gbekoun.users
+        WHERE id::text = ANY(%s)
+    """, (sender_ids,), fetch_all=True) or []
+    users = {row['id']: row for row in rows}
+
+    for message in items:
+        if not message or not message.get('sender_id'):
+            continue
+        user = users.get(str(message['sender_id']))
+        if not user or user.get('deleted_at'):
+            message['sender'] = {'id': str(message['sender_id']),
+                                 'display_name': DELETED_ACCOUNT_NAME, 'avatar_url': None}
+        else:
+            message['sender'] = {'id': user['id'], 'display_name': user['display_name'],
+                                 'avatar_url': user['avatar_url']}
+    return messages

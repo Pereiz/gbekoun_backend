@@ -5,12 +5,10 @@ import uuid
 from datetime import datetime, timedelta
 from psycopg2 import sql
 from core.database import execute_query, messages_col, transaction
-from core.realtime import (
-    emit_to_conversation,
-    join_users_to_conversation,
-    remove_users_from_conversation,
-)
+from core.realtime import emit_to_conversation, join_users_to_conversation
 from core.security import require_auth
+from services.groups import announce_departures, leave_conversation
+from services.messaging import attach_senders
 from services.users import resolve_user_id
 from utils.message_helpers import serialize_message_value
 
@@ -56,6 +54,7 @@ def get_conversations():
     """), (g.current_user_id, g.current_user_id, limit, offset), fetch_all=True)
     
     # Ajouter le dernier message de chaque conversation depuis MongoDB
+    last_messages = []
     for conv in conversations:
         last_msg = list(messages_col.find(
             {
@@ -63,11 +62,15 @@ def get_conversations():
                 'deleted_for': {'$ne': g.current_user_id}
             }
         ).sort('timestamp', -1).limit(1))
-        
+        conv['last_message'] = last_msg[0] if last_msg else None
         if last_msg:
-            conv['last_message'] = serialize_message_value(last_msg[0])
-        else:
-            conv['last_message'] = None
+            last_messages.append(last_msg[0])
+
+    # Nom de l'expéditeur (« Koffi : … » dans la liste des groupes), en une requête.
+    attach_senders(last_messages)
+    for conv in conversations:
+        if conv['last_message']:
+            conv['last_message'] = serialize_message_value(conv['last_message'])
     
     return jsonify(conversations), 200
 
@@ -156,13 +159,19 @@ def create_group():
     # Tout se fait dans une seule transaction : en cas d'erreur, rien n'est créé
     # (avant, un groupe à moitié créé pouvait rester en base).
     with transaction() as cur:
+        requested = [str(i) for i in participant_user_ids] + [str(p) for p in participants_phones]
         cur.execute("""
-            SELECT id FROM gbekoun.users
+            SELECT id::text AS id, phone_number FROM gbekoun.users
             WHERE (phone_number = ANY(%s) OR id::text = ANY(%s)) AND deleted_at IS NULL
         """, ([str(p) for p in participants_phones], [str(i) for i in participant_user_ids]))
-        # Le créateur en premier, puis les autres sans doublon (même numéro répété, ou soi-même).
+        found = {}
+        for row in cur.fetchall():
+            found[row['id']] = row['id']
+            found[row['phone_number']] = row['id']
+        # Le créateur en premier, puis les autres dans l'ordre demandé, sans doublon.
+        # Cet ordre compte : c'est celui de la succession si le dernier admin part.
         participant_ids = list(dict.fromkeys(
-            [str(g.current_user_id)] + [str(row['id']) for row in cur.fetchall()]
+            [str(g.current_user_id)] + [found[ref] for ref in requested if ref in found]
         ))
 
         cur.execute("""
@@ -171,9 +180,11 @@ def create_group():
         """, (conversation_id, name, avatar_url, g.current_user_id))
 
         # Le créateur est administrateur du groupe.
+        # clock_timestamp() (et non NOW(), identique pour toute la transaction) :
+        # chaque membre a une date d'arrivée distincte, dans l'ordre ci-dessus.
         cur.executemany("""
-            INSERT INTO gbekoun.conversation_participants (conversation_id, user_id, is_admin)
-            VALUES (%s, %s, %s)
+            INSERT INTO gbekoun.conversation_participants (conversation_id, user_id, is_admin, joined_at)
+            VALUES (%s, %s, %s, clock_timestamp())
         """, [
             (conversation_id, user_id, user_id == str(g.current_user_id))
             for user_id in participant_ids
@@ -288,14 +299,15 @@ def delete_conversation(conversation_id):
         {'$addToSet': {'deleted_for': g.current_user_id}}
     )
 
-    execute_query(sql.SQL("""
-        UPDATE gbekoun.conversation_participants
-        SET deleted_at = NOW(), unread_count = 0
-        WHERE conversation_id = %s AND user_id = %s
-    """), (conversation_id, g.current_user_id))
-
-    remove_users_from_conversation([g.current_user_id], conversation_id)
-    return jsonify({'message': 'Conversation supprimée'}), 200
+    # Pour un groupe : supprimer = quitter (avec succession de l'admin si besoin).
+    # Avant, le dernier admin pouvait « supprimer » et laisser le groupe sans admin.
+    with transaction() as cur:
+        departure = leave_conversation(cur, conversation_id, g.current_user_id)
+    announce_departures([departure] if departure else [])
+    return jsonify({
+        'message': 'Conversation supprimée',
+        'promoted_user_id': departure['promoted_user_id'] if departure else None,
+    }), 200
 
 
 # ===================== GESTION DES ÉTATS =====================
@@ -464,7 +476,7 @@ def add_participant(conversation_id):
         INSERT INTO gbekoun.conversation_participants (conversation_id, user_id, is_admin)
         VALUES (%s, %s, FALSE)
         ON CONFLICT (conversation_id, user_id) DO UPDATE
-        SET deleted_at = NULL, is_admin = FALSE
+        SET deleted_at = NULL, is_admin = FALSE, joined_at = NOW()
     """, (conversation_id, user_to_add['id']))
 
     # Ses appareils connectés reçoivent les messages du groupe immédiatement.
@@ -490,17 +502,18 @@ def remove_participant(conversation_id, user_id):
     
     if not admin_check['is_admin']:
         return jsonify({'error': 'Seul un administrateur peut retirer des participants'}), 403
-    
-    # Retirer le participant (soft delete)
-    execute_query(sql.SQL("""
-        UPDATE gbekoun.conversation_participants
-        SET deleted_at = NOW(), is_admin = FALSE
-        WHERE conversation_id = %s AND user_id = %s
-    """), (conversation_id, user_id))
 
-    # Il ne doit plus recevoir les messages en temps réel.
-    remove_users_from_conversation([user_id], conversation_id)
-    return jsonify({'message': 'Participant retiré'}), 200
+    # Retirer le participant (avec succession si un admin se retire lui-même)
+    with transaction() as cur:
+        departure = leave_conversation(cur, conversation_id, user_id)
+    if not departure:
+        return jsonify({'error': 'Ce participant ne fait pas partie du groupe',
+                        'code': 'NOT_A_MEMBER'}), 404
+
+    # Il ne reçoit plus les messages en temps réel ; les autres sont prévenus.
+    announce_departures([departure], removed_by=g.current_user_id)
+    return jsonify({'message': 'Participant retiré',
+                    'promoted_user_id': departure['promoted_user_id']}), 200
 
 
 @conversations_bp.route('/<conversation_id>/leave', methods=['POST'])
@@ -517,26 +530,15 @@ def leave_group(conversation_id):
     
     if not participant:
         return jsonify({'error': 'Conversation non trouvée'}), 404
-    
-    # Vérifier que ce n'est pas le seul admin
-    if participant['is_admin']:
-        admin_count = execute_query(sql.SQL("""
-            SELECT COUNT(*) as count FROM gbekoun.conversation_participants
-            WHERE conversation_id = %s AND is_admin = TRUE AND deleted_at IS NULL
-        """), (conversation_id,), fetch_one=True)
-        
-        if admin_count['count'] == 1:
-            return jsonify({'error': 'Vous êtes le seul administrateur. Nommez un autre admin avant de quitter.'}), 400
-    
-    # Quitter le groupe
-    execute_query(sql.SQL("""
-        UPDATE gbekoun.conversation_participants
-        SET deleted_at = NOW(), is_admin = FALSE
-        WHERE conversation_id = %s AND user_id = %s
-    """), (conversation_id, g.current_user_id))
 
-    remove_users_from_conversation([g.current_user_id], conversation_id)
-    return jsonify({'message': 'Groupe quitté'}), 200
+    # Le dernier admin peut partir : le membre le plus ancien devient admin.
+    with transaction() as cur:
+        departure = leave_conversation(cur, conversation_id, g.current_user_id)
+    announce_departures([departure] if departure else [])
+    return jsonify({
+        'message': 'Groupe quitté',
+        'promoted_user_id': departure['promoted_user_id'] if departure else None,
+    }), 200
 
 
 # ===================== ADMINISTRATION DU GROUPE =====================

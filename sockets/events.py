@@ -13,7 +13,7 @@ from core.database import execute_query, messages_col
 from core.extensions import socketio
 from core.realtime import conversation_room, device_room, user_room
 from core.security import KIND_MOBILE, SESSION_ACTIVE, decode_token, get_session_state, verify_token
-from services.messaging import MessageError, create_message, is_participant
+from services.messaging import MessageError, attach_senders, create_message, is_participant
 from utils.message_helpers import (
     parse_object_id,
     serialize_message_value,
@@ -169,7 +169,7 @@ def handle_send_message(data):
     except MessageError as error:
         return _emit_error(error.code, error.message)
 
-    socket_message = serialize_message_value(message)
+    socket_message = serialize_message_value(attach_senders(message))
 
     # Aux autres participants, puis un seul accusé de réception à l'expéditeur.
     emit('new_message', socket_message, room=conversation_room(conversation_id), include_self=False)

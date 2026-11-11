@@ -3,10 +3,11 @@ import uuid
 from flask import Blueprint, request, jsonify, g
 from flasgger import swag_from
 from psycopg2 import sql
-from core.database import execute_query
+from core.database import execute_query, transaction
 from core.http import error_response
 from core.realtime import disconnect_user
 from core.security import require_auth
+from services.groups import announce_departures, leave_all_conversations
 from services.media import delete_avatar_file, save_avatar
 from services.users import (
     are_contacts,
@@ -536,6 +537,12 @@ def delete_account():
         RETURNING old.avatar_url AS previous_url
     """, (g.current_user_id, g.current_user_id), fetch_one=True)
     delete_avatar_file(previous and previous['previous_url'])
+
+    # Il quitte toutes ses conversations : dans ses groupes, s'il était le
+    # dernier admin, le membre le plus ancien prend le relais.
+    with transaction() as cur:
+        departures = leave_all_conversations(cur, g.current_user_id)
+    announce_departures(departures)
 
     # Ses connexions temps réel sont fermées ; ses tokens sont refusés par require_auth.
     disconnect_user(g.current_user_id)

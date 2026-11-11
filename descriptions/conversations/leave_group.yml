@@ -1,4 +1,7 @@
 Quitte un groupe
+Si c'est le dernier admin, le membre le plus ancien devient admin automatiquement :
+la réponse contient `promoted_user_id` et les membres reçoivent `participant_left`
+puis `admin_changed` (reason = last_admin_left).
 ---
 tags:
   - Conversations

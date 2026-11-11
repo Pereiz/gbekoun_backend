@@ -13,6 +13,7 @@ from core.database import execute_query, messages_col, transaction
 from core.http import error_response
 from core.realtime import disconnect_user
 from core.security import require_admin, require_auth
+from services.groups import announce_departures, leave_all_conversations
 from services.media import delete_avatar_file
 from services.devices import (
     KIND_WEB,
@@ -338,8 +339,12 @@ def delete_user(user_id):
     avatar = execute_query("SELECT avatar_url FROM gbekoun.users WHERE id = %s", (user_id,), fetch_one=True)
     delete_avatar_file(avatar and avatar['avatar_url'])
     
-    # Supprimer l'utilisateur de PostgreSQL (hard delete)
-    execute_query(sql.SQL("""DELETE FROM gbekoun.users WHERE id = %s"""), (user_id,))
+    # Quitter ses conversations AVANT la suppression (sinon ses groupes
+    # perdraient leur admin), puis supprimer l'utilisateur (hard delete).
+    with transaction() as cur:
+        departures = leave_all_conversations(cur, user_id)
+        cur.execute("DELETE FROM gbekoun.users WHERE id = %s", (user_id,))
+    announce_departures(departures, removed_by=g.current_user_id)
     disconnect_user(user_id)
 
     return jsonify({

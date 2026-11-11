@@ -1,4 +1,6 @@
 Historique des messages (paginé)
+Chaque message contient `sender` = {id, display_name, avatar_url}
+(« Compte supprimé » pour un compte supprimé).
 ---
 tags:
   - Messages

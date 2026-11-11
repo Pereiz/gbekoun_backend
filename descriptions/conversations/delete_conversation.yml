@@ -1,4 +1,7 @@
-Supprime une conversation (soft delete)
+Supprime une conversation pour soi (soft delete)
+L'historique est effacé pour soi seul. Discussion directe : elle réapparaît (vide) au
+prochain message. Groupe : équivaut à le quitter, avec la même succession de l'admin
+que /leave (`promoted_user_id` dans la réponse).
 ---
 tags:
   - Conversations

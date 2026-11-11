@@ -5,8 +5,9 @@ flasgger==0.9.7.1
 gunicorn==23.0.0
 
 # Temps réel (mode threading ; simple-websocket active le transport WebSocket)
-flask-socketio==5.3.4
-python-socketio==5.9.0
+flask-socketio==5.5.1
+python-socketio==5.12.1
+python-engineio==4.13.2
 simple-websocket==1.1.0
 
 # Bases de données

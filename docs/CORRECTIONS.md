@@ -635,6 +635,76 @@ Let's Encrypt et son renouvellement (domaine public requis), MongoDB 8.0 et
 PostgreSQL 16 (testés en 6.0 et 15). À faire au premier déploiement :
 `LETSENCRYPT_STAGING=1 ./deploy/init-letsencrypt.sh` pour un essai sans quota.
 
+### R6. Texte uniquement pour l'instant (pas de médias)
+
+**Décision** : pas d'upload de médias dans le chat pour le moment (peut-être
+plus tard). En conséquence, les types `image`, `video`, `audio` et `file`
+sont **refusés à l'envoi** (`400`, code `MEDIA_NOT_SUPPORTED`) : sans upload,
+un client pouvait envoyer un « média » pointant vers n'importe quelle URL
+externe (traçage de ceux qui l'affichent). Types acceptés : `text`,
+`location`, `contact`. `/api/config` annonce désormais `file_sharing` et
+`voice_messages` à `false`. La photo de profil (R4) n'est pas concernée.
+
+### R7. Un groupe pouvait se retrouver sans administrateur
+
+**Problème.** « Supprimer la discussion » sur un groupe le faisait quitter
+sans aucun contrôle : le dernier admin pouvait partir et laisser le groupe
+sans admin (plus personne pour ajouter ou retirer des membres). Même chose
+lors de la suppression d'un compte (par l'utilisateur ou par un admin) ; le
+compte supprimé restait d'ailleurs membre de ses conversations.
+
+**Correction** ([services/groups.py](../services/groups.py)) : règle unique
+appliquée à **tous** les départs — quitter, supprimer la discussion, être
+retiré, suppression du compte :
+
+- si le dernier admin part, **le membre le plus ancien devient admin**
+  automatiquement (au lieu de refuser le départ : on ne peut pas refuser la
+  suppression d'un compte) ;
+- verrou par conversation : deux admins qui partent en même temps ne
+  laissent pas le groupe sans admin (vérifié) ;
+- événements temps réel `participant_left` et `admin_changed`
+  (`reason: "last_admin_left"`) envoyés aux membres ;
+- la réponse de `leave` / `DELETE` / retrait contient `promoted_user_id` ;
+- un compte supprimé quitte toutes ses conversations et n'est plus
+  « réactivé » dans une discussion directe quand l'autre lui écrit.
+
+**Trouvé en testant** : les membres d'un groupe créé en une fois avaient tous
+exactement la même date d'arrivée (heure de la transaction) : « le plus
+ancien » était tiré au hasard. Désormais chaque membre a une date distincte,
+dans l'ordre où l'appli les a listés à la création ; un membre réintégré
+repart de la date de sa réintégration.
+
+### R8. Nom de l'expéditeur dans les messages
+
+**Problème.** Les messages ne contenaient que `sender_id` : dans un groupe,
+l'appli ne savait pas afficher qui a écrit quoi (cf. PDF d'observations).
+
+**Correction.** Chaque message renvoyé contient
+`sender: {id, display_name, avatar_url}` : historique, message seul,
+recherche, épinglés, mentions, dernier message de la liste des
+conversations, événements `new_message` (socket, REST, transfert). Les noms
+sont lus **en une seule requête** par liste et **à l'affichage** (un
+changement de nom se voit aussi sur les anciens messages). Compte supprimé :
+`display_name = "Compte supprimé"`. (`avatar_url` reste soumis à la
+confidentialité de la photo lors de son affichage.)
+
+### R9. Mise à jour de Flask-SocketIO
+
+`flask-socketio` 5.3.4 → **5.5.1**, `python-socketio` 5.9.0 → **5.12.1**
+(`python-engineio` 4.13.2 épinglé). Le client de test Socket.IO reçoit
+désormais les événements (incompatibilité de la 5.3.4). Aucun changement de
+code nécessaire.
+
+**Tests R6 à R9** : 30 tests unitaires (dont 2 nouveaux) ; scénario réel
+**16/16** (succession dans les 4 cas, départ simultané de 2 admins, nom de
+l'expéditeur partout, compte supprimé, refus des médias, Socket.IO 5.5 en
+WebSocket et en long-polling) ; image de production reconstruite avec les
+nouvelles versions et scénario complet à travers nginx rejoué (même
+résultat qu'avant, aucune erreur dans les logs Gunicorn). Note : avec le
+serveur de **développement** (`python app.py`), la fermeture d'une connexion
+WebSocket affiche `write() before start_response` dans les logs — message
+connu et sans conséquence, absent avec Gunicorn.
+
 ---
 
 ## Réorganisation du projet
@@ -798,21 +868,26 @@ Le fichier reste ignoré par Git (choix existant dans `.gitignore`).
 | Socket `react` : ne marchait pas | Fonctionne ; événement `reaction_added`. |
 | Socket : erreurs sur ID invalide parfois silencieuses | Événement `error` avec `code` (`INVALID_ID`, `FORBIDDEN`, `NOT_FOUND`…). |
 | Présence `user_presence` : jamais envoyée | Envoyée aux contacts à la connexion / déconnexion. |
+| Messages : `sender_id` seulement | `sender: {id, display_name, avatar_url}` en plus (R8). |
+| Types `image` / `video` / `audio` / `file` acceptés avec n'importe quel contenu | Refusés (`MEDIA_NOT_SUPPORTED`) : texte, position, contact uniquement (R6). |
+| Le dernier admin ne pouvait pas quitter (`400`) mais pouvait « supprimer » le groupe | Il peut partir ; le membre le plus ancien devient admin (`promoted_user_id`, événement `admin_changed`) (R7). |
+| Recherche par nom : numéros complets renvoyés | `phone_masked` seulement ; conversations démarrables par `user_id` (R1). |
+| Message envoyé par REST : pas d'événement temps réel | `new_message` diffusé aux autres participants (R3). |
 
 ---
 
 ## Reste à faire
 
-Déjà traités : point 1 (connexion liée à l'appareil, accès PC admin), R1
-(recherche), R2 (echo/health), R3 (diffusion REST), R4 (photo de profil),
-confidentialité `privacy_about` et photo « contacts » (avec R1).
+Déjà traités : point 1 (connexion liée à l'appareil, accès PC admin), R1 à
+R9 (recherche, echo/health, diffusion REST, photo de profil, Docker dev/prod,
+texte uniquement, succession des admins, nom de l'expéditeur, Flask-SocketIO).
 
-1. Upload des médias du chat (images, vidéos, fichiers) : la photo de profil
-   est faite (R4), les médias des messages restent à faire.
-2. « Supprimer » un groupe = le quitter sans les contrôles de `leave` (le dernier
-   admin peut partir et laisser le groupe sans admin).
-3. Les messages ne contiennent que `sender_id` ; pour les groupes, ajouter le
-   nom de l'expéditeur simplifierait l'affichage (cf. PDF d'observations).
-4. Pas de limitation du nombre de requêtes (rate limiting) : protégerait contre
-   le test massif de numéros (`by-phone`) et les abus en général.
-5. Mettre à jour Flask-SocketIO (5.3.4 → 5.3.6+) pour retrouver un client de test fonctionnel.
+1. **Médias du chat** (images, vidéos, vocaux, documents) : volontairement
+   reportés (R6). À concevoir le jour où ils seront nécessaires.
+2. L'avatar d'un **groupe** (`PUT /api/conversations/<id>`, champ `avatar_url`)
+   accepte encore n'importe quelle URL externe (même problème que l'ancien
+   avatar de profil, corrigé en R4) : à remplacer par un upload ou à retirer.
+3. L'appli se connecte à MongoDB et PostgreSQL avec les comptes
+   administrateurs des conteneurs : créer des comptes dédiés à droits
+   limités (lecture/écriture sur la seule base de l'appli) réduirait l'impact
+   d'une faille.

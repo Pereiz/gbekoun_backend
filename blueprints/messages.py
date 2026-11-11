@@ -12,6 +12,7 @@ from core.security import require_auth
 from services.messaging import (
     MessageError,
     after_message_created,
+    attach_senders,
     create_message,
     is_participant,
 )
@@ -63,7 +64,7 @@ def get_messages(conversation_id):
         query['_id'] = {'$lt': before_object_id}
 
     messages = list(messages_col.find(query).sort('timestamp', -1).limit(_limit_arg()))
-    return jsonify(serialize_message_value(messages)), 200
+    return jsonify(serialize_message_value(attach_senders(messages))), 200
 
 
 @messages_bp.route('/<conversation_id>/messages/search', methods=['GET'])
@@ -86,7 +87,7 @@ def search_messages(conversation_id):
         'content': {'$regex': re.escape(query_text), '$options': 'i'}
     }).sort('timestamp', -1).limit(_limit_arg())
 
-    return jsonify(serialize_message_value(list(cursor))), 200
+    return jsonify(serialize_message_value(attach_senders(list(cursor)))), 200
 
 
 @messages_bp.route('/<conversation_id>/messages/<message_id>', methods=['GET'])
@@ -109,7 +110,7 @@ def get_message(conversation_id, message_id):
     if not message:
         return jsonify({'error': 'Message non trouvé'}), 404
 
-    return jsonify(serialize_message_value(message)), 200
+    return jsonify(serialize_message_value(attach_senders(message))), 200
 
 
 @messages_bp.route('/<conversation_id>/messages', methods=['POST'])
@@ -133,7 +134,7 @@ def send_message_rest(conversation_id):
     # Diffusion temps réel aux autres participants (comme l'envoi par socket).
     # Avant, un message envoyé par REST n'arrivait chez les autres qu'au
     # prochain rechargement de la conversation.
-    emit_to_conversation('new_message', serialize_message_value(message), conversation_id,
+    emit_to_conversation('new_message', serialize_message_value(attach_senders(message)), conversation_id,
                          exclude_user_id=g.current_user_id)
 
     reply_to_id = message.get('reply_to_id')
@@ -355,7 +356,7 @@ def forward_message(conversation_id, message_id):
         new_message['_id'] = result.inserted_id
         after_message_created(target_conv_id, g.current_user_id, str(result.inserted_id))
 
-        emit_to_conversation('new_message', serialize_message_value(new_message), target_conv_id,
+        emit_to_conversation('new_message', serialize_message_value(attach_senders(new_message)), target_conv_id,
                              exclude_user_id=g.current_user_id)
         forwarded_messages.append({
             'conversation_id': target_conv_id,
@@ -398,7 +399,7 @@ def get_starred_messages():
         item['is_deleted'] = message.get('is_deleted', False)
         item['deleted_at'] = message.get('deleted_at')
 
-    return jsonify(serialize_message_value(starred)), 200
+    return jsonify(serialize_message_value(attach_senders(starred))), 200
 
 
 @messages_bp.route('/<conversation_id>/messages/<message_id>/star', methods=['POST'])
@@ -463,4 +464,4 @@ def get_mentions():
             SELECT name, type FROM gbekoun.conversations WHERE id = %s
         """, (msg['conversation_id'],), fetch_one=True)
 
-    return jsonify(serialize_message_value(messages)), 200
+    return jsonify(serialize_message_value(attach_senders(messages))), 200
