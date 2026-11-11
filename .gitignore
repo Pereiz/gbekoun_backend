@@ -77,6 +77,10 @@ docker-compose.dev.yml
 # Certificats HTTPS (générés sur le serveur, contiennent la clé privée)
 deploy/certbot/
 
+# ---------- Documentation hors dépôt (technique, API mobile) ----------
+docs/DOC_TECHNIQUE.md
+docs/API_MOBILE.md
+
 # ---------- Notes personnelles (hors projet) ----------
 note.odt
 commande.md

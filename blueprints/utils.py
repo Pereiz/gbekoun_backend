@@ -114,7 +114,7 @@ def health_check():
     healthy = all(state == 'up' for state in services.values())
     return jsonify({
         'status': 'healthy' if healthy else 'degraded',
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.utcnow(),
         'services': services,
     }), 200 if healthy else 503
 
@@ -325,7 +325,7 @@ def ping():
     """
     return jsonify({
         'pong': True,
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': datetime.utcnow()
     }), 200
 
 
@@ -335,7 +335,7 @@ def server_time():
     Heure du serveur
     """
     return jsonify({
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.utcnow(),
         'timezone': 'UTC',
         'unix_timestamp': int(datetime.utcnow().timestamp())
     }), 200
@@ -356,5 +356,5 @@ def echo():
         'echo': data,
         'method': request.method,
         'headers': headers,
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': datetime.utcnow()
     }), 200

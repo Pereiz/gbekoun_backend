@@ -7,13 +7,17 @@ import threading
 import time
 from http import HTTPStatus
 
+from datetime import date, datetime
+
 from flask import Flask, jsonify
+from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 from flasgger import Swagger
 
 from core.config import Config, cors_origins, validate_config
 from core.extensions import socketio
 from core.http import ApiError
+from utils.message_helpers import to_utc_isoformat
 
 logging.basicConfig(level=logging.INFO)
 validate_config()
@@ -21,7 +25,25 @@ validate_config()
 # -------------------------------
 # Application Flask & Socket.IO
 # -------------------------------
+class ISODateJSONProvider(DefaultJSONProvider):
+    """Toutes les dates de l'API en ISO 8601 UTC (ex. 2026-11-11T09:30:00.000Z).
+
+    Par défaut, Flask écrit les dates au format HTTP (« Wed, 11 Nov 2026 09:30:00
+    GMT ») : les dates PostgreSQL et celles des messages avaient donc deux
+    formats différents. Les dates sans fuseau (PostgreSQL) sont en UTC.
+    """
+
+    @staticmethod
+    def default(o):
+        if isinstance(o, datetime):
+            return to_utc_isoformat(o)
+        if isinstance(o, date):
+            return o.isoformat()
+        return DefaultJSONProvider.default(o)
+
+
 app = Flask(__name__)
+app.json = ISODateJSONProvider(app)
 app.config['SECRET_KEY'] = Config.SECRET_KEY
 app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
 # Avant : "*" (n'importe quel site pouvait appeler l'API depuis un navigateur).

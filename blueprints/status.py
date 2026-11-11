@@ -216,7 +216,7 @@ def update_online():
     return jsonify({
         'message': f'Statut mis à jour: {"en ligne" if is_online else "hors ligne"}',
         'is_online': is_online,
-        'last_seen': datetime.utcnow().isoformat()
+        'last_seen': datetime.utcnow()
     }), 200
 
 
@@ -239,7 +239,7 @@ def heartbeat():
     
     return jsonify({
         'message': 'Heartbeat reçu',
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': datetime.utcnow(),
         'status': 'online'
     }), 200
 

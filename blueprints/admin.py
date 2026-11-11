@@ -595,7 +595,7 @@ def create_backup():
     return jsonify({
         'message': 'Backup créé avec succès',
         'backup_file': archive_name,
-        'created_at': datetime.utcnow().isoformat()
+        'created_at': datetime.utcnow()
     }), 200
 
 
@@ -679,7 +679,7 @@ def get_metrics():
             'formatted': str(uptime).split('.')[0]
         },
         'flask_process': flask_process,
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': datetime.utcnow()
     }), 200
 
 

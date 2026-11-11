@@ -760,6 +760,22 @@ de production rejoué avec les comptes limités (y compris sauvegarde et
 **restauration**) + avatar de groupe **9/9** ; installation neuve : comptes
 créés automatiquement et API opérationnelle.
 
+### R12. Un seul format de date dans toute l'API
+
+**Problème** (cf. PDF d'observations sur les dates). Trois formats coexistaient :
+messages en ISO 8601 (`2026-11-11T09:30:00.000Z`), dates PostgreSQL au format
+HTTP de Flask (`Wed, 11 Nov 2026 09:30:00 GMT` : `created_at`, `last_seen`,
+`muted_until`, `joined_at`…), et quelques dates fabriquées à la main sans
+fuseau (`2026-11-11T09:30:00.123456` : `/api/time`, `/api/health`, statut…).
+
+**Correction.** Fournisseur JSON global (`ISODateJSONProvider` dans `app.py`) :
+**toutes** les dates sortent en ISO 8601 UTC à la milliseconde, terminées par
+`Z` (les dates PostgreSQL sans fuseau sont en UTC). Les dates « à la main »
+passent désormais par ce fournisseur. Test unitaire ajouté.
+
+> Changement visible par l'appli mobile : à intégrer en même temps que les
+> autres (voir docs/API_MOBILE.md, changement n° 9).
+
 ### Vérification complète du projet (11/11/2026, avant la documentation)
 
 Installation **neuve** de la pile de production (nginx + API + PostgreSQL +
@@ -962,6 +978,7 @@ Le fichier reste ignoré par Git (choix existant dans `.gitignore`).
 | Messages : `sender_id` seulement | `sender: {id, display_name, avatar_url}` en plus (R8). |
 | Types `image` / `video` / `audio` / `file` acceptés avec n'importe quel contenu | Refusés (`MEDIA_NOT_SUPPORTED`) : texte, position, contact uniquement (R6). |
 | Le dernier admin ne pouvait pas quitter (`400`) mais pouvait « supprimer » le groupe | Il peut partir ; le membre le plus ancien devient admin (`promoted_user_id`, événement `admin_changed`) (R7). |
+| Dates : format HTTP pour les comptes/conversations, ISO pour les messages | ISO 8601 UTC partout (R12). |
 | Recherche par nom : numéros complets renvoyés | `phone_masked` seulement ; conversations démarrables par `user_id` (R1). |
 | Message envoyé par REST : pas d'événement temps réel | `new_message` diffusé aux autres participants (R3). |
 
