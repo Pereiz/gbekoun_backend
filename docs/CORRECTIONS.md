@@ -760,6 +760,42 @@ de production rejoué avec les comptes limités (y compris sauvegarde et
 **restauration**) + avatar de groupe **9/9** ; installation neuve : comptes
 créés automatiquement et API opérationnelle.
 
+### Vérification complète du projet (11/11/2026, avant la documentation)
+
+Installation **neuve** de la pile de production (nginx + API + PostgreSQL +
+MongoDB + sauvegardes, comptes à droits limités), testée de bout en bout à
+travers nginx en HTTPS :
+
+| Section | Résultat |
+|---------|----------|
+| Infrastructure (nginx, santé, utilitaires) | 16/16 |
+| Comptes, appareils, codes d'invitation | 25/25 |
+| Session PC de l'admin | 9/9 |
+| Utilisateurs, recherche, confidentialité, photo | 18/18 |
+| Conversations directes et groupes | 26/26 |
+| Messages (REST + tous les événements Socket.IO) | 25/25 |
+| Statuts et présence | 5/5 (\*) |
+| Départs et succession des admins | 4/4 |
+| Administration | 16/16 |
+| Fin de session, suppression de compte | 3/3 |
+| Sauvegarde et restauration | 2/2 |
+| **Couverture des routes** | **107/107 routes appelées** |
+
+(\*) la présence n'est envoyée qu'aux contacts existant au moment de la
+connexion : vérifiée par un test dédié (contact vu en ligne puis hors ligne).
+
+Contrôles complémentaires : 30 tests unitaires, compilation, analyse statique
+(pyflakes), 98 fiches Swagger valides et toutes utilisées, `nginx -t`,
+fichiers compose dev/prod valides ; **aucune erreur** dans les logs de l'API,
+de PostgreSQL, de MongoDB et du service de sauvegarde (aucun refus de droit
+avec les comptes limités).
+
+Corrigé pendant cette vérification : `/oauth2-redirect.html` (page de
+Swagger) n'était pas fermé en production ; les dépassements de quota nginx
+sont journalisés en avertissement (et non en erreur) ; une requête SQL
+inutile exécutée à chaque `POST /api/status/online` et un import inutile
+retirés.
+
 ---
 
 ## Réorganisation du projet

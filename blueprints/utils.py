@@ -5,7 +5,6 @@ from datetime import datetime
 import logging
 from flask import Blueprint, abort, request, jsonify
 from flasgger import swag_from
-from psycopg2 import sql
 from core.config import Config
 from core.database import execute_query, mongo_health_client
 

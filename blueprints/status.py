@@ -211,21 +211,8 @@ def update_online():
     
     # Notifier les contacts que le statut a changé
     # Récupérer toutes les conversations de l'utilisateur
-    conversations = execute_query(sql.SQL("""
-        SELECT DISTINCT conversation_id 
-        FROM gbekoun.conversation_participants 
-        WHERE user_id = %s AND deleted_at IS NULL
-    """), (g.current_user_id,), fetch_all=True)
-    
-    # Ici, vous pouvez utiliser WebSocket pour notifier les participants
-    # from flask_socketio import emit
-    # for conv in conversations:
-    #     emit('user_presence', {
-    #         'user_id': g.current_user_id,
-    #         'is_online': is_online,
-    #         'last_seen': datetime.utcnow().isoformat()
-    #     }, room=f"conv_{conv['conversation_id']}", include_self=False)
-    
+    # La présence en temps réel (user_presence) est envoyée par Socket.IO à la
+    # connexion/déconnexion (sockets/events.py) ; cette route ne fait que la base.
     return jsonify({
         'message': f'Statut mis à jour: {"en ligne" if is_online else "hors ligne"}',
         'is_online': is_online,

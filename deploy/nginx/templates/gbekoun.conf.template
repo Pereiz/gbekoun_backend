@@ -11,6 +11,10 @@
 limit_req_zone $binary_remote_addr zone=gbekoun_auth:10m rate=30r/m;
 limit_req_zone $binary_remote_addr zone=gbekoun_api:10m  rate=20r/s;
 limit_req_status 429;
+# Dépassements de quota journalisés en avertissement (et non en erreur) :
+# les vraies erreurs restent visibles dans les logs.
+limit_req_log_level warn;
+limit_conn_log_level warn;
 limit_conn_zone $binary_remote_addr zone=gbekoun_conn:10m;
 
 map $http_upgrade $connection_upgrade {
@@ -122,7 +126,7 @@ server {
     # Documentation Swagger : désactivée en production (disponible en dev).
     # Pour l'ouvrir à une adresse précise : remplacer « return 404; » par
     #   allow 203.0.113.10; deny all; proxy_pass http://gbekoun_api;
-    location ~ ^/(apidocs|apispec\.json|flasgger_static) {
+    location ~ ^/(apidocs|apispec\.json|flasgger_static|oauth2-redirect\.html) {
         return 404;
     }
 
