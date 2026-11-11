@@ -50,7 +50,7 @@ clones existants) : ce n'est pas fait ici. La rotation des mots de passe
 base Render de production. `gbekoundb.sql` contenait un autre mot de passe.
 
 **Correction.**
-- [docker-compose.yml](../docker-compose.yml) réécrit : **aucun secret**, tout
+- `docker-compose.yml` réécrit (devenu [docker-compose.dev.yml](../docker-compose.dev.yml), voir R5) : **aucun secret**, tout
   vient du fichier `.env` (non versionné). Il lance désormais un environnement
   local complet (API + PostgreSQL + MongoDB) au lieu de pointer vers la prod.
 - `gbekoundb.sql` remplacé par [database/postgres/schema.sql](../database/postgres/schema.sql),
@@ -585,6 +585,56 @@ suppression GPS vérifiée, PNG transparent, fichier piégé, 2 Mo, `../`) +
 scénario réel **30/30** (envoi, affichage, 3 réglages de confidentialité,
 remplacement, refus, chemin piégé, blocage, suppression du compte).
 
+### R5. Docker : un fichier pour le développement, un pour la production
+
+**Contexte.** Le déploiement se fait désormais sur un serveur perso, tout en
+Docker avec volumes persistants (Render abandonné).
+
+**`docker-compose.dev.yml`** (remplace `docker-compose.yml`) : code monté dans
+le conteneur avec **rechargement automatique**, Swagger ouvert, bases
+accessibles depuis la machine (5435, 27020).
+
+**`docker-compose.prod.yml`** :
+
+| Élément | Détail |
+|---------|--------|
+| **Nginx** (seul exposé) | HTTPS (TLS 1.2/1.3), redirection HTTP → HTTPS, WebSocket pour Socket.IO, HSTS + en-têtes de sécurité, version masquée, envois limités à 10 Mo, Swagger fermé, connexions par IP ou faux nom de domaine coupées |
+| **Limitation de débit** | `/api/auth/` 30/min (rafale 20), reste de l'API 20/s (rafale 60), 50 connexions simultanées par IP — protège notamment contre l'essai en masse de numéros ou de codes |
+| **Let's Encrypt** | `deploy/init-letsencrypt.sh` (une fois), puis renouvellement automatique (certbot toutes les 12 h, rechargement nginx toutes les 6 h) |
+| **Bases** | Non exposées sur Internet ; volumes `postgres_data`, `mongo_data`, `uploads_data` |
+| **Sauvegardes** | Service `backup` : chaque jour à 3 h, PostgreSQL + MongoDB + photos, intégrité SHA-256, conservation 14 jours, `restore.sh` (avec confirmation `--yes`) |
+| **Robustesse** | Redémarrage automatique, healthchecks, démarrage dans l'ordre (bases → API → nginx), rotation des logs (10 Mo × 5) |
+| **API** | `TRUST_PROXY=1` : vraie IP du client, `https`/`wss` correctement annoncés (`ProxyFix`) |
+
+**Autres changements.** `pymongo` 4.5 → **4.10.1** (compatible MongoDB 8.0,
+version par défaut des deux fichiers ; MongoDB 6.0 n'est plus maintenu depuis
+juillet 2025). PostgreSQL 16 par défaut. Versions configurables
+(`POSTGRES_IMAGE`, `MONGO_IMAGE`).
+
+**Trouvé en testant.**
+- Le site d'exemple de l'image nginx (« Welcome to nginx ») répondait à
+  toute requête par IP : neutralisé.
+- Docker Compose interprète les `$` du `.env` : un mot de passe contenant `$`
+  est silencieusement tronqué. Règle documentée : lettres, chiffres, `-`, `_`.
+- Mettre à jour MongoDB en envoyant `init.js` par l'entrée standard ne
+  l'exécutait pas : la commande documentée utilise le fichier monté.
+
+**Tests** : images construites (API avec Pillow et pymongo 4.10.1 ; backup avec
+`mongodb-tools`) ; pile de production lancée en local avec un certificat
+autosigné (`postgres:15-alpine`, `mongo:6.0`) : **25/26** vérifications — la
+seule « erreur » venait du script de test (rafale déjà entamée par des appels
+précédents), le quota fonctionnant comme prévu. Vérifié : redirection HTTPS,
+en-têtes, Swagger fermé, `wss://` annoncé, TLS refusé pour un autre domaine,
+**Socket.IO en vrai WebSocket via nginx**, message REST diffusé, photo
+envoyée/servie, 413 au-delà de 10 Mo, 429 sur rafale de connexions,
+sauvegarde complète puis **restauration** (utilisateur, messages et photo
+supprimés → de retour).
+
+**Non testé ici** (nécessite le vrai serveur) : l'obtention du certificat
+Let's Encrypt et son renouvellement (domaine public requis), MongoDB 8.0 et
+PostgreSQL 16 (testés en 6.0 et 15). À faire au premier déploiement :
+`LETSENCRYPT_STAGING=1 ./deploy/init-letsencrypt.sh` pour un essai sans quota.
+
 ---
 
 ## Réorganisation du projet
@@ -617,8 +667,10 @@ gbekoun_backend/
 ├── scripts/create_admin.py # Création du premier administrateur
 ├── tests/e2e/              # Tests (sans base de données)
 ├── docs/                   # CORRECTIONS.md (ce fichier), DEMARRAGE.md
-├── Dockerfile              # Image de l'API (production)
-└── docker-compose.yml      # Environnement local complet
+├── deploy/                 # Production : nginx, sauvegardes, certificat HTTPS (voir R5)
+├── Dockerfile              # Image de l'API
+├── docker-compose.dev.yml  # Développement (code monté, rechargement automatique)
+└── docker-compose.prod.yml # Production (nginx, certbot, api, bases, sauvegardes)
 ```
 
 Les URL de l'API, les noms d'événements Socket.IO et les formats de réponse

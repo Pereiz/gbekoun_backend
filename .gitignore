@@ -72,6 +72,10 @@ htmlcov/
 # ---------- Docker ----------
 docker-compose.override.yml
 docker-compose-dev.yml
+docker-compose.dev.yml
+
+# Certificats HTTPS (générés sur le serveur, contiennent la clé privée)
+deploy/certbot/
 
 # ---------- Notes personnelles (hors projet) ----------
 note.odt

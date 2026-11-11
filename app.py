@@ -28,6 +28,12 @@ app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
 CORS(app, resources={r"/*": {"origins": cors_origins()}})
 socketio.init_app(app, cors_allowed_origins=cors_origins(), async_mode='threading')
 
+if Config.TRUST_PROXY:
+    # Un seul proxy de confiance (Nginx) : vraie IP du client, https, nom de domaine.
+    # Appliqué après Socket.IO pour que /socket.io/ en profite aussi.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
 # Enregistre les événements Socket.IO (un seul endroit : sockets/events.py).
 import sockets.events  # noqa: E402,F401
 

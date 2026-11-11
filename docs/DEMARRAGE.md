@@ -45,6 +45,12 @@ Générer une valeur aléatoire :
 python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
+> ⚠️ **Mots de passe : uniquement lettres, chiffres, `-` et `_`** (ce que
+> produit la commande ci-dessus). Docker Compose interprète les `$` du `.env`
+> (un mot de passe `abc$def` devient silencieusement `abc`), et les
+> caractères `@ : / ? #` cassent l'adresse de connexion MongoDB construite à
+> partir du mot de passe.
+
 > Ton `.env` actuel a été écrit pour l'ancienne configuration : compare-le
 > avec `.env.example` et ajoute `FLASK_DEBUG`, `MONGO_ROOT_USER`,
 > `MONGO_ROOT_PASSWORD`. Les variables `PG_SCHEMA`, `UPLOAD_FOLDER`,
@@ -63,8 +69,11 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 ## Option A — Tout dans Docker (le plus simple)
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.dev.yml up --build
 ```
+
+Le code du projet est monté dans le conteneur : **toute modification recharge
+l'API automatiquement**. Swagger : <http://localhost:8880/apidocs/>.
 
 Au **premier** démarrage :
 - PostgreSQL exécute `database/postgres/schema.sql` (création du schéma et des tables) ;
@@ -74,7 +83,7 @@ Ces scripts ne sont exécutés que si les volumes sont vides. Pour tout
 réinitialiser (⚠️ efface les données locales) :
 
 ```bash
-docker compose down -v
+docker compose -f docker-compose.dev.yml down -v
 ```
 
 Vérifier :
@@ -87,15 +96,14 @@ curl http://localhost:8880/api/health      # état PostgreSQL + MongoDB
 Puis créer le premier administrateur ([étape 2](#2-créer-le-premier-administrateur)) :
 
 ```bash
-docker compose exec api python -m scripts.create_admin --phone +22990000000 --name "Admin"
+docker compose -f docker-compose.dev.yml exec api python -m scripts.create_admin --phone +22990000000 --name "Admin"
 ```
 
 Commandes utiles :
 
 ```bash
-docker compose logs -f api        # logs de l'API
-docker compose restart api        # après une modification du code (pas de rechargement auto)
-docker compose down               # tout arrêter (les données sont conservées)
+docker compose -f docker-compose.dev.yml logs -f api   # logs de l'API
+docker compose -f docker-compose.dev.yml down          # tout arrêter (les données sont conservées)
 ```
 
 ---
@@ -107,7 +115,7 @@ Pratique pour développer : rechargement automatique, débogueur, etc.
 **1. Démarrer seulement les bases :**
 
 ```bash
-docker compose up -d postgres mongo
+docker compose -f docker-compose.dev.yml up -d postgres mongo
 ```
 
 **2. Installer les dépendances (une seule fois) :**
@@ -270,50 +278,123 @@ FLASK_DEBUG=1 python tests/e2e/test_message_flow.py -v
 
 ## Production (serveur perso, tout en Docker)
 
-> **Render n'est plus utilisé** (décision du 11/11/2026). Le déploiement se fait
-> sur une machine distante, entièrement en Docker, avec des **volumes
-> persistants** pour PostgreSQL, MongoDB et les fichiers envoyés (photos de profil).
-> Un `docker-compose` dédié à la production (reverse proxy HTTPS, redémarrage
-> automatique, sauvegardes) reste à écrire.
-
-Le `docker-compose.yml` actuel lance déjà les trois services avec leurs
-volumes (`postgres_data`, `mongo_data`, `uploads_data`). L'API tourne avec :
+> Render n'est plus utilisé (décision du 11/11/2026). Tout tourne sur ton
+> serveur avec `docker-compose.prod.yml`.
 
 ```
-gunicorn --worker-class gthread --workers 1 --threads 100 --bind 0.0.0.0:$PORT app:app
+Internet ──443/80──▶ nginx ──▶ api ──▶ postgres / mongo     (réseau interne Docker)
+                       ▲                  ▲
+                    certbot            backup (cron)
 ```
 
-> Garder **un seul worker** : l'état des connexions Socket.IO est en mémoire
-> du process. Pour passer à plusieurs workers/instances, il faudra un message
-> queue (Redis) pour Socket.IO.
+| Service | Rôle |
+|---------|------|
+| `nginx` | Seul service exposé. HTTPS, redirection HTTP → HTTPS, WebSocket, limitation de débit, en-têtes de sécurité, Swagger fermé. |
+| `certbot` | Certificat Let's Encrypt, renouvelé automatiquement (nginx le recharge toutes les 6 h). |
+| `api` | Gunicorn (1 worker, 100 threads), `TRUST_PROXY=1`. |
+| `postgres`, `mongo` | **Non exposés** sur Internet. Volumes `postgres_data`, `mongo_data`. |
+| `backup` | Sauvegarde quotidienne PostgreSQL + MongoDB + photos, conservation 14 jours. |
 
-**Variables d'environnement (fichier `.env` du serveur) :**
+Tous les services redémarrent automatiquement (`unless-stopped`) et leurs logs
+tournent (10 Mo × 5 fichiers par service).
 
-| Variable | Obligatoire | Exemple / remarque |
-|----------|:-----------:|--------------------|
-| `SECRET_KEY` | ✅ | valeur aléatoire (le démarrage échoue sans) |
-| `JWT_SECRET` | ✅ | valeur aléatoire (le démarrage échoue sans) |
-| `PG_PASSWORD` | ✅ | mot de passe PostgreSQL (le démarrage échoue sans) |
-| `PG_DATABASE`, `PG_USER` | | `gbekoundb`, `gbekoundb_user` |
-| `MONGO_ROOT_USER`, `MONGO_ROOT_PASSWORD` | ✅ | compte du conteneur MongoDB |
-| `MONGO_DB` | | `gbekoundb_messages` (défaut) |
-| `UPLOAD_FOLDER` | | `/app/uploads` dans le conteneur (volume `uploads_data`) |
-| `CORS_ORIGINS` | | domaine(s) de l'interface admin web, ex. `https://admin.gbekoun.example`. Vide = aucun site web autorisé (l'appli mobile fonctionne quand même). |
-| `EXPO_ACCESS_TOKEN` | | si l'accès sécurisé aux push Expo est activé |
-| `FLASK_DEBUG` | | ne pas définir (ou `0`) en production |
+### Première installation
 
-**Mettre à jour le schéma d'une base existante** (ajoute ce qui manque,
-n'efface rien) :
+Prérequis sur le serveur : Docker + Docker Compose, un **nom de domaine**
+(ex. `api.gbekoun.example`) qui pointe vers l'IP du serveur, ports **80 et
+443** ouverts.
 
 ```bash
-docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DATABASE" < database/postgres/schema.sql
-docker compose exec -T mongo mongosh -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASSWORD" < database/mongo/init.js
+git clone <dépôt> gbekoun_backend && cd gbekoun_backend
+cp .env.example .env
+# Remplir .env : FLASK_DEBUG=0, SECRET_KEY, JWT_SECRET, PG_*, MONGO_ROOT_*,
+#                API_DOMAIN, LETSENCRYPT_EMAIL, CORS_ORIGINS (domaine de l'admin web)
+
+# 1. Construire les images
+docker compose -f docker-compose.prod.yml build
+
+# 2. Obtenir le certificat HTTPS (une seule fois ; essai possible avec LETSENCRYPT_STAGING=1)
+./deploy/init-letsencrypt.sh
+
+# 3. Tout démarrer
+docker compose -f docker-compose.prod.yml up -d
+
+# 4. Créer le premier administrateur (affiche un code d'activation de 24 h)
+docker compose -f docker-compose.prod.yml exec api python -m scripts.create_admin --phone +229XXXXXXXX --name "Admin"
 ```
 
-**Volumes à sauvegarder** : `postgres_data`, `mongo_data` et `uploads_data`
-(les photos de profil ne sont que sur ce volume). La route
-`POST /api/admin/backup/create` nécessite `pg_dump` et `mongodump` dans le
-conteneur de l'API (absents de l'image actuelle : elle répond `501`).
+Vérifier : `curl https://<API_DOMAIN>/api/health`.
+
+L'appli mobile utilise `https://<API_DOMAIN>` pour l'API et `wss://<API_DOMAIN>`
+pour Socket.IO (l'API l'annonce correctement grâce à `TRUST_PROXY`).
+
+### Mettre à jour
+
+```bash
+git pull
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Si le schéma a changé (nouvelle table, nouvelle colonne) — rejouable sans risque :
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < database/postgres/schema.sql
+docker compose -f docker-compose.prod.yml exec -T mongo sh -c 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" /docker-entrypoint-initdb.d/01_init.js'
+```
+
+### Sauvegardes
+
+- Automatiques chaque jour à 3 h (`BACKUP_CRON`), conservées 14 jours
+  (`BACKUP_RETENTION_DAYS`), dans `./backups/` sur le serveur (`BACKUP_HOST_DIR`).
+- Chaque sauvegarde : `postgres.dump`, `mongo.archive.gz`, `uploads.tar.gz`
+  (photos) et `SHA256SUMS` (vérification d'intégrité).
+- **Copier régulièrement `./backups/` hors du serveur** (autre machine,
+  stockage externe) : une sauvegarde sur le même disque ne protège pas
+  d'une panne de ce disque.
+
+```bash
+docker compose -f docker-compose.prod.yml exec backup backup.sh          # sauvegarde immédiate
+docker compose -f docker-compose.prod.yml exec backup restore.sh         # liste les sauvegardes
+docker compose -f docker-compose.prod.yml stop api
+docker compose -f docker-compose.prod.yml exec backup restore.sh 20261112_030000 --yes
+docker compose -f docker-compose.prod.yml start api
+```
+
+La restauration vérifie d'abord l'intégrité (`SHA256SUMS`) et **remplace**
+les données actuelles (d'où `--yes`).
+
+### Limitation de débit (nginx)
+
+| Zone | Limite par adresse IP |
+|------|-----------------------|
+| `/api/auth/` (connexion, inscription, activation, codes) | 30 / minute, rafale de 20 |
+| Reste de l'API (dont l'attente de validation d'appareil) | 20 / seconde, rafale de 60 |
+| Socket.IO | non limité (connexions longues), 50 connexions simultanées par IP |
+
+Au-delà : `429`. Réglages larges car beaucoup d'abonnés mobiles partagent une
+même IP chez leur opérateur ; à ajuster dans
+`deploy/nginx/templates/gbekoun.conf.template` si besoin.
+
+### Variables d'environnement
+
+| Variable | Obligatoire | Remarque |
+|----------|:-----------:|----------|
+| `SECRET_KEY`, `JWT_SECRET` | ✅ | valeurs aléatoires (`secrets.token_hex(32)`) |
+| `PG_DATABASE`, `PG_USER`, `PG_PASSWORD` | ✅ | compte PostgreSQL créé au premier démarrage |
+| `MONGO_ROOT_USER`, `MONGO_ROOT_PASSWORD` | ✅ | compte MongoDB créé au premier démarrage |
+| `API_DOMAIN`, `LETSENCRYPT_EMAIL` | ✅ | domaine de l'API, e-mail d'alerte Let's Encrypt |
+| `CORS_ORIGINS` | | domaine(s) de l'interface admin web |
+| `MONGO_DB` | | `gbekoundb_messages` |
+| `BACKUP_CRON`, `BACKUP_RETENTION_DAYS`, `BACKUP_HOST_DIR`, `TZ` | | `0 3 * * *`, `14`, `./backups`, `Africa/Porto-Novo` |
+| `POSTGRES_IMAGE`, `MONGO_IMAGE` | | `postgres:16-alpine`, `mongo:8.0` |
+| `HTTP_PORT`, `HTTPS_PORT` | | `80`, `443` |
+| `EXPO_ACCESS_TOKEN` | | si l'accès sécurisé aux push Expo est activé |
+
+`FLASK_DEBUG`, `TRUST_PROXY`, `PG_HOST`, `MONGO_URI` et `UPLOAD_FOLDER` sont
+fixés par `docker-compose.prod.yml`.
+
+> La route `POST /api/admin/backup/create` répond `501` dans ce déploiement :
+> les sauvegardes sont faites par le service `backup`.
 
 ---
 
@@ -323,8 +404,8 @@ conteneur de l'API (absents de l'image actuelle : elle répond `501`).
 |----------|----------------|
 | `RuntimeError: Variables d'environnement manquantes : ...` | `SECRET_KEY` / `JWT_SECRET` / `PG_PASSWORD` absents. En local, mettre `FLASK_DEBUG=1` ou les définir. |
 | `Bind for 0.0.0.0:5435 failed: port is already allocated` | Les anciens conteneurs `postgres_chat` / `mongodb_chat` tournent : `docker stop postgres_chat mongodb_chat`. |
-| `relation "gbekoun.users" does not exist` | Le schéma n'a pas été appliqué : relancer `schema.sql` (ou `docker compose down -v` puis `up`). |
-| `Authentication failed` côté MongoDB | `MONGO_URI` ne correspond pas à `MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD`, ou le volume Mongo a été créé avec d'autres identifiants (`docker compose down -v`). |
+| `relation "gbekoun.users" does not exist` | Le schéma n'a pas été appliqué : relancer `schema.sql` (ou `docker compose -f docker-compose.dev.yml down -v` puis `up`). |
+| `Authentication failed` côté MongoDB | `MONGO_URI` ne correspond pas à `MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD`, ou le volume Mongo a été créé avec d'autres identifiants (`down -v`). |
 | `401 Compte introuvable ou supprimé` avec un token valide | Le compte a été supprimé, ou le token vient d'une autre base. |
 | `401 DEVICE_REVOKED` | Un autre appareil a été activé sur ce compte (ou l'admin a révoqué celui-ci). Réactiver l'appareil. |
 | `401 SESSION_EXPIRED` (PC) | L'heure de session est écoulée sans prolongation confirmée sur le téléphone : se reconnecter. |
@@ -332,5 +413,8 @@ conteneur de l'API (absents de l'image actuelle : elle répond `501`).
 | `403 WEB_ADMIN_ONLY` | Appel d'une route hors administration depuis un PC (normal), ou compte non admin qui tente d'ouvrir une session PC. |
 | L'interface admin web est bloquée par le navigateur (erreur CORS) | Son domaine n'est pas dans `CORS_ORIGINS`. |
 | `403 DEVICE_NOT_RECOGNIZED` au login | Ce `device_secret` n'est pas celui de l'appareil du compte : passer par la validation de l'ancien appareil ou un code admin. |
+| Mot de passe refusé alors qu'il est bon | Il contient `$` (interprété par Docker Compose) ou `@ : / ? #` (casse l'adresse MongoDB) : en choisir un fait de lettres, chiffres, `-`, `_`. |
+| `429 Too Many Requests` (production) | Limitation de débit nginx : attendre, ou ajuster les zones dans `deploy/nginx/templates/gbekoun.conf.template`. |
+| L'appli reçoit `ws://` au lieu de `wss://` | `TRUST_PROXY` doit valoir `1` derrière nginx (déjà le cas dans `docker-compose.prod.yml`). |
 | Base existante créée avant le 11/11/2026 | Appliquer `database/migrations/002_user_devices.sql` (ou rejouer `schema.sql`). |
 | Socket connecté mais aucun message reçu | Vérifier que le token est passé dans `query: { token }` et que l'utilisateur est membre actif de la conversation. |

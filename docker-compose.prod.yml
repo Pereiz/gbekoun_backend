@@ -1,0 +1,156 @@
+# =============================================================
+# GBEKOUN - PRODUCTION (serveur perso)
+#
+#   Internet ──443/80──▶ nginx ──▶ api ──▶ postgres / mongo
+#                          ▲                 ▲
+#                       certbot            backup (cron)
+#
+# Première installation : voir docs/DEMARRAGE.md (« Production »)
+#   cp .env.example .env            # remplir, FLASK_DEBUG=0, API_DOMAIN, LETSENCRYPT_EMAIL
+#   ./deploy/init-letsencrypt.sh    # certificat HTTPS (une seule fois)
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Seul nginx est exposé. PostgreSQL et MongoDB ne sont joignables que par le
+# réseau interne Docker. Les données sont dans des volumes persistants.
+# =============================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?API_DOMAIN requis dans .env}
+    volumes:
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      # Neutralise le site d'exemple de l'image (« Welcome to nginx »).
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${CERTBOT_DIR:-./deploy/certbot}/conf:/etc/letsencrypt:ro
+      - ${CERTBOT_DIR:-./deploy/certbot}/www:/var/www/certbot:ro
+    # Recharge la configuration toutes les 6 h pour prendre les certificats renouvelés.
+    command: >
+      /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done &
+      exec /docker-entrypoint.sh nginx -g 'daemon off;'"
+    logging: *default-logging
+
+  certbot:
+    image: certbot/certbot:v2.11.0
+    restart: unless-stopped
+    volumes:
+      - ${CERTBOT_DIR:-./deploy/certbot}/conf:/etc/letsencrypt
+      - ${CERTBOT_DIR:-./deploy/certbot}/www:/var/www/certbot
+    # Renouvellement automatique (certbot ne renouvelle qu'à moins de 30 jours de l'expiration).
+    entrypoint: >
+      /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet;
+      sleep 12h & wait $${!}; done"
+    logging: *default-logging
+
+  api:
+    build: .
+    image: gbekoun-api:latest
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env}
+    environment:
+      FLASK_DEBUG: "0"
+      TRUST_PROXY: "1"
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      MONGO_URI: mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017/${MONGO_DB:-gbekoundb_messages}?authSource=admin
+      UPLOAD_FOLDER: /app/uploads
+    expose:
+      - "8880"
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8880/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DATABASE:?PG_DATABASE requis}
+      POSTGRES_USER: ${PG_USER:?PG_USER requis}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?PG_PASSWORD requis}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/postgres/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  mongo:
+    image: ${MONGO_IMAGE:-mongo:8.0}
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:?MONGO_ROOT_USER requis}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD requis}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-gbekoundb_messages}
+    volumes:
+      - mongo_data:/data/db
+      - ./database/mongo/init.js:/docker-entrypoint-initdb.d/01_init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  backup:
+    build:
+      context: ./deploy/backup
+      args:
+        POSTGRES_IMAGE: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    image: gbekoun-backup:latest
+    restart: unless-stopped
+    environment:
+      PG_HOST: postgres
+      PG_DATABASE: ${PG_DATABASE}
+      PG_USER: ${PG_USER}
+      PG_PASSWORD: ${PG_PASSWORD}
+      MONGO_HOST: mongo
+      MONGO_DB: ${MONGO_DB:-gbekoundb_messages}
+      MONGO_ROOT_USER: ${MONGO_ROOT_USER}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      BACKUP_CRON: ${BACKUP_CRON:-0 3 * * *}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_ON_START: ${BACKUP_ON_START:-0}
+      TZ: ${TZ:-Africa/Porto-Novo}
+    volumes:
+      - uploads_data:/uploads
+      # Dossier de l'hôte : facile à copier hors du serveur (recommandé).
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  mongo_data:
+  uploads_data:

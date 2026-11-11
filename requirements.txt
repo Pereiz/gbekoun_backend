@@ -11,7 +11,7 @@ simple-websocket==1.1.0
 
 # Bases de données
 psycopg2-binary==2.9.9
-pymongo==4.5.0
+pymongo==4.10.1           # compatible MongoDB 4.0 à 8.0
 dnspython==2.8.0          # requis pour les URI mongodb+srv:// (Atlas)
 
 # Sécurité / configuration

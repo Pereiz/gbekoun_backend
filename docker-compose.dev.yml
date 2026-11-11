@@ -1,25 +1,36 @@
-# Environnement de développement complet : API + PostgreSQL + MongoDB.
+# =============================================================
+# GBEKOUN - DÉVELOPPEMENT
 #
 #   cp .env.example .env      # puis remplir les mots de passe
-#   docker compose up --build
+#   docker compose -f docker-compose.dev.yml up --build
 #
+# - le code est monté dans le conteneur : toute modification recharge l'API ;
+# - Swagger disponible sur http://localhost:8880/apidocs/ ;
+# - bases accessibles depuis la machine : PostgreSQL localhost:5435, MongoDB localhost:27020.
 # Aucun secret ici : tout vient du fichier .env (non versionné).
-# Ce fichier n'est PAS utilisé par Render (qui construit seulement le Dockerfile).
+# Pour la production : docker-compose.prod.yml.
+# =============================================================
 
 services:
   api:
     build: .
-    container_name: gbekoun_api
+    image: gbekoun-api:dev
+    container_name: gbekoun_dev_api
     restart: unless-stopped
-    env_file: .env
+    env_file: ${ENV_FILE:-.env}
     environment:
+      FLASK_DEBUG: "1"
       # Dans le réseau Docker, les bases sont joignables par leur nom de service.
       PG_HOST: postgres
       PG_PORT: "5432"
       MONGO_URI: mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017/${MONGO_DB:-gbekoundb_messages}?authSource=admin
+      UPLOAD_FOLDER: /app/uploads
+    # Serveur de développement avec rechargement automatique du code.
+    command: python app.py
     ports:
       - "${PORT:-8880}:8880"
     volumes:
+      - .:/app
       - uploads_data:/app/uploads
     depends_on:
       postgres:
@@ -28,15 +39,15 @@ services:
         condition: service_healthy
 
   postgres:
-    image: postgres:16
-    container_name: gbekoun_postgres
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: gbekoun_dev_postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${PG_DATABASE}
       POSTGRES_USER: ${PG_USER}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
     ports:
-      - "5435:5432"   # accès depuis la machine hôte : localhost:5435
+      - "5435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/postgres/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
@@ -47,15 +58,15 @@ services:
       retries: 10
 
   mongo:
-    image: mongo:7
-    container_name: gbekoun_mongo
+    image: ${MONGO_IMAGE:-mongo:8.0}
+    container_name: gbekoun_dev_mongo
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
       MONGO_INITDB_DATABASE: ${MONGO_DB:-gbekoundb_messages}
     ports:
-      - "27020:27017"  # accès depuis la machine hôte : localhost:27020
+      - "27020:27017"
     volumes:
       - mongo_data:/data/db
       - ./database/mongo/init.js:/docker-entrypoint-initdb.d/01_init.js:ro

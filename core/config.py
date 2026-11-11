@@ -35,6 +35,10 @@ class Config:
     # Ex. : CORS_ORIGINS=https://admin.gbekoun.example,https://staging-admin.gbekoun.example
     CORS_ORIGINS = [o.strip() for o in os.getenv('CORS_ORIGINS', '').split(',') if o.strip()]
 
+    # Derrière un reverse proxy (Nginx en production) : lire X-Forwarded-For/Proto/Host.
+    # Ne PAS activer si l'API est exposée directement (en-têtes falsifiables).
+    TRUST_PROXY = _env_bool('TRUST_PROXY')
+
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024
     # Fichiers envoyés (avatars…). En Docker : volume persistant monté sur /app/uploads.
     UPLOAD_FOLDER = os.path.abspath(os.getenv('UPLOAD_FOLDER', 'uploads'))

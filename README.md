@@ -9,5 +9,6 @@ Socket.IO, PostgreSQL (comptes, conversations) et MongoDB (messages).
 
 ```bash
 cp .env.example .env     # puis remplir les valeurs
-docker compose up --build
+docker compose -f docker-compose.dev.yml up --build     # développement
+docker compose -f docker-compose.prod.yml up -d --build # production (voir docs/DEMARRAGE.md)
 ```
