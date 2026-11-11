@@ -33,7 +33,8 @@ WEB_TOKEN_TTL = timedelta(hours=1)
 WEB_IDLE_TIMEOUT = timedelta(minutes=5)
 
 # Routes accessibles depuis le PC d'un admin (tout le reste → 403 WEB_ADMIN_ONLY).
-_WEB_ALLOWED_PREFIXES = ('/api/admin/', '/api/auth/invite-codes')
+# /api/media/ : l'interface admin affiche les photos de profil.
+_WEB_ALLOWED_PREFIXES = ('/api/admin/', '/api/auth/invite-codes', '/api/media/')
 _WEB_ALLOWED_ROUTES = {
     ('GET', '/api/auth/verify'),
     ('POST', '/api/auth/logout'),

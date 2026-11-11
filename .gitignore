@@ -45,7 +45,7 @@ render_db
 *.sqlite3
 backups/
 uploads/
-media/
+/media/
 static/uploads/
 !uploads/.gitkeep
 

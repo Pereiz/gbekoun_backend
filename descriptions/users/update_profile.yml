@@ -17,12 +17,10 @@ parameters:
           type: string
         bio:
           type: string
-        avatar_url:
-          type: string
 responses:
   200:
     description: Profil mis à jour
   400:
-    description: Données invalides
+    description: Données invalides, ou AVATAR_USE_UPLOAD si avatar_url est envoyé (utiliser POST /api/users/me/avatar)
   409:
     description: Nom d'utilisateur déjà pris

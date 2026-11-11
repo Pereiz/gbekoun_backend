@@ -7,6 +7,7 @@ from core.database import execute_query
 from core.http import error_response
 from core.realtime import disconnect_user
 from core.security import require_auth
+from services.media import delete_avatar_file, save_avatar
 from services.users import (
     are_contacts,
     escape_like,
@@ -139,8 +140,12 @@ def update_profile():
         params.append(data['bio'])
     
     if 'avatar_url' in data:
-        updates.append("avatar_url = %s")
-        params.append(data['avatar_url'])
+        # Avant, n'importe quelle URL était acceptée (ex. un lien externe qui
+        # trace qui affiche le profil). La photo passe par l'upload désormais.
+        return error_response(
+            'Utilisez POST /api/users/me/avatar pour changer la photo de profil.',
+            400, 'AVATAR_USE_UPLOAD',
+        )
     
     if not updates:
         return jsonify({'error': 'Rien à mettre à jour'}), 400
@@ -158,6 +163,42 @@ def update_profile():
     updated = execute_query(query, tuple(params), fetch_one=True)
     
     return jsonify(updated), 200
+
+
+@users_bp.route('/me/avatar', methods=['POST'])
+@require_auth
+@swag_from('../descriptions/users/upload_avatar.yml')
+def upload_avatar():
+    """Photo de profil : multipart/form-data, champ « file » (JPEG, PNG, WebP, GIF, 2 Mo max)."""
+    file = request.files.get('file')
+    if file is None:
+        return error_response('Fichier image requis (champ « file »)', 400, 'FILE_REQUIRED')
+
+    avatar_url = save_avatar(g.current_user_id, file)
+    previous = execute_query("""
+        UPDATE gbekoun.users u SET avatar_url = %s, updated_at = NOW()
+        FROM (SELECT avatar_url FROM gbekoun.users WHERE id = %s) old
+        WHERE u.id = %s
+        RETURNING old.avatar_url AS previous_url
+    """, (avatar_url, g.current_user_id, g.current_user_id), fetch_one=True)
+    delete_avatar_file(previous and previous['previous_url'])
+
+    return jsonify({'avatar_url': avatar_url}), 200
+
+
+@users_bp.route('/me/avatar', methods=['DELETE'])
+@require_auth
+@swag_from('../descriptions/users/delete_avatar.yml')
+def delete_avatar():
+    """Retire la photo de profil."""
+    previous = execute_query("""
+        UPDATE gbekoun.users u SET avatar_url = NULL, updated_at = NOW()
+        FROM (SELECT avatar_url FROM gbekoun.users WHERE id = %s) old
+        WHERE u.id = %s
+        RETURNING old.avatar_url AS previous_url
+    """, (g.current_user_id, g.current_user_id), fetch_one=True)
+    delete_avatar_file(previous and previous['previous_url'])
+    return jsonify({'avatar_url': None}), 200
 
 
 @users_bp.route('/me/status', methods=['GET'])
@@ -487,6 +528,15 @@ def delete_account():
         WHERE id = %s
     """), (g.current_user_id,))
     
+    # Sa photo de profil est effacée du disque.
+    previous = execute_query("""
+        UPDATE gbekoun.users u SET avatar_url = NULL
+        FROM (SELECT avatar_url FROM gbekoun.users WHERE id = %s) old
+        WHERE u.id = %s
+        RETURNING old.avatar_url AS previous_url
+    """, (g.current_user_id, g.current_user_id), fetch_one=True)
+    delete_avatar_file(previous and previous['previous_url'])
+
     # Ses connexions temps réel sont fermées ; ses tokens sont refusés par require_auth.
     disconnect_user(g.current_user_id)
     return jsonify({'message': 'Compte supprimé'}), 200

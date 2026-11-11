@@ -36,6 +36,8 @@ class Config:
     CORS_ORIGINS = [o.strip() for o in os.getenv('CORS_ORIGINS', '').split(',') if o.strip()]
 
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024
+    # Fichiers envoyés (avatars…). En Docker : volume persistant monté sur /app/uploads.
+    UPLOAD_FOLDER = os.path.abspath(os.getenv('UPLOAD_FOLDER', 'uploads'))
     BACKUP_DIR = os.getenv('BACKUP_DIR', 'backups')
     PORT = int(os.getenv('PORT', '8880'))
 

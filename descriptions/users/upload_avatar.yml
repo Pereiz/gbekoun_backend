@@ -1,0 +1,29 @@
+Changer sa photo de profil
+Envoi en multipart/form-data, champ « file ». Formats : JPEG, PNG, WebP, GIF (première image).
+2 Mo maximum. L'image est recadrée au carré, réduite à 512×512 et réencodée en JPEG
+(les métadonnées EXIF, dont la position GPS, sont supprimées).
+Renvoie `avatar_url`, un chemin relatif à préfixer par l'adresse de l'API ; il change à
+chaque nouvelle photo. L'ancienne photo est supprimée.
+---
+tags:
+  - Utilisateurs
+consumes:
+  - multipart/form-data
+parameters:
+  - name: file
+    in: formData
+    type: file
+    required: true
+responses:
+  200:
+    description: Photo enregistrée
+    schema:
+      type: object
+      properties:
+        avatar_url: {type: string, example: "/api/media/avatars/550e8400-e29b-41d4-a716-446655440000/9f2c4e7a1b3d5f6e8a0c2e4f6a8b0d2e.jpg"}
+  400:
+    description: FILE_REQUIRED
+  413:
+    description: FILE_TOO_LARGE (plus de 2 Mo)
+  415:
+    description: UNSUPPORTED_IMAGE ou INVALID_IMAGE

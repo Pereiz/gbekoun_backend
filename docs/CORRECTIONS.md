@@ -28,12 +28,12 @@ connexion liée à l'appareil (11/11/2026, voir
 
 | # | Action | Pourquoi |
 |---|--------|----------|
-| A | **Changer le mot de passe PostgreSQL sur Render** (Dashboard → base → *Rotate password*), puis mettre à jour `PG_PASSWORD` dans les variables d'environnement du service. | Il était écrit en clair dans `docker-compose.yml` et se trouve **dans l'historique Git poussé sur GitHub** (commits `5e9e294`, `27c934b`). Le retirer du fichier ne suffit pas. |
+| A | **Base Render** : Render n'est plus utilisé. Si l'ancienne base Render existe encore, la **supprimer** (ou au minimum changer son mot de passe : *Rotate password*). Ne jamais réutiliser ce mot de passe sur le nouveau serveur. | Il était écrit en clair dans `docker-compose.yml` et se trouve **dans l'historique Git poussé sur GitHub** (commits `5e9e294`, `27c934b`). Le retirer du fichier ne suffit pas. |
 | B | Si le mot de passe `npg_…` présent dans l'ancien `gbekoundb.sql` est (ou a été) utilisé quelque part (Neon ?), le changer aussi. | Même raison : il est dans l'historique Git. |
-| C | Vérifier que **`SECRET_KEY`, `JWT_SECRET` et `PG_PASSWORD`** sont définis sur Render. | L'application **refuse désormais de démarrer** en production si l'un d'eux manque (point 5). Générer une valeur : `python -c "import secrets; print(secrets.token_hex(32))"`. |
+| C | Vérifier que **`SECRET_KEY`, `JWT_SECRET` et `PG_PASSWORD`** sont définis dans le `.env` du serveur de production. | L'application **refuse désormais de démarrer** en production si l'un d'eux manque (point 5). Générer une valeur : `python -c "import secrets; print(secrets.token_hex(32))"`. |
 | D | Vérifier en prod s'il existe un utilisateur `+1234567890` admin, et le supprimer/rétrograder. | L'ancien script SQL créait cet **administrateur par défaut**. Comme la connexion se fait par numéro seul, n'importe qui pouvait se connecter en admin avec ce numéro. Requête : `SELECT id, is_admin FROM gbekoun.users WHERE phone_number = '+1234567890';` |
 | E | Vérifier l'index TTL MongoDB en prod : `db.messages.getIndexes()`. S'il y a `idx_ttl_timestamp`, **MongoDB supprime automatiquement tous les messages de plus d'un an**. Pour l'enlever : `db.messages.dropIndex("idx_ttl_timestamp")`. | L'ancien `gekoun_messages.js` le créait (commenté « optionnel » mais actif). Il n'est plus créé par le nouveau script. |
-| F | Si `JWT_SECRET` change sur Render, tous les utilisateurs devront se reconnecter. | Les anciens tokens signés avec l'ancien secret deviennent invalides. C'est voulu si l'ancien secret était une valeur par défaut. |
+| F | Si `JWT_SECRET` change, tous les utilisateurs devront se reconnecter. | Les anciens tokens signés avec l'ancien secret deviennent invalides. C'est voulu si l'ancien secret était une valeur par défaut. |
 
 Pour réécrire l'historique Git et effacer définitivement les secrets
 (`git filter-repo`), il faut le faire en connaissance de cause (force-push,
@@ -216,8 +216,8 @@ contenait que le dossier `uploads`, tout en répondant « Backup créé avec suc
   répond **`501`** avec un message explicite au lieu de faire semblant ;
 - en cas d'échec : `500` (détail dans les logs), dossier temporaire nettoyé.
 
-> L'image Docker de production n'embarque pas ces outils. Sur Render, les
-> sauvegardes automatiques de la base managée sont de toute façon préférables.
+> L'image Docker de l'API n'embarque pas encore ces outils (à prévoir avec le
+> déploiement sur le serveur perso, voir docs/DEMARRAGE.md).
 
 ### 13. Inscription et création de groupe non atomiques
 
@@ -539,6 +539,52 @@ que par socket. `POST /read` sur une conversation dont on n'est pas membre → 4
 
 **Tests R2 + R3** : 22 tests unitaires (dont 2 nouveaux) + scénario réel **18/18**.
 
+### R4. Photo de profil (upload)
+
+**Problème.** Aucune route d'upload : la photo de profil ne pouvait pas être
+ajoutée depuis l'appli (cf. PDF d'observations). `PUT /api/users/me`
+acceptait n'importe quelle URL dans `avatar_url` (un lien externe pouvait
+servir à savoir qui consulte un profil).
+
+**Stockage.** Sur le disque du serveur, dans `UPLOAD_FOLDER` (volume Docker
+persistant `uploads_data`), puisque le déploiement se fait désormais sur une
+machine perso (plus de Render, dont le disque était effacé à chaque déploiement).
+
+**Fonctionnement.**
+
+| Route | Rôle |
+|-------|------|
+| `POST /api/users/me/avatar` (multipart, champ `file`) | Envoie une photo ; renvoie `avatar_url` |
+| `DELETE /api/users/me/avatar` | Retire la photo |
+| `GET /api/media/avatars/<user_id>/<fichier>.jpg` | Affiche la photo (token requis) |
+
+- Formats acceptés : JPEG, PNG, WebP, GIF ; **2 Mo maximum**.
+- Chaque image est **vérifiée** (vraie image, protection contre les « bombes
+  de décompression »), **recadrée au carré, réduite à 512×512** et
+  **réencodée en JPEG** : les métadonnées EXIF, dont la **position GPS** que
+  contiennent souvent les photos de téléphone, sont supprimées, ainsi que
+  tout contenu caché dans le fichier.
+- Nom de fichier aléatoire, nouveau à chaque changement (pas d'image
+  périmée en cache côté appli) ; l'ancienne photo est effacée du disque.
+- **Confidentialité** : l'affichage respecte le réglage photo
+  (`everyone` / `contacts` / `nobody`) et les blocages ; seule la photo
+  actuelle est servie. Le PC d'un admin peut afficher les photos.
+- Suppression du compte (par l'utilisateur ou par un admin) → photo effacée.
+- `PUT /api/users/me` refuse désormais `avatar_url` (`400 AVATAR_USE_UPLOAD`).
+
+**Côté appli mobile** : `avatar_url` est un chemin relatif à préfixer par
+l'adresse de l'API, et l'image se charge **avec l'en-tête Authorization**
+(ex. expo-image : `source={{ uri: API_URL + avatar_url, headers: { Authorization: 'Bearer ' + token } }}`).
+
+**Fichiers** : [services/media.py](../services/media.py), [blueprints/media.py](../blueprints/media.py),
+[blueprints/users.py](../blueprints/users.py), [blueprints/admin.py](../blueprints/admin.py),
+`requirements.txt` (ajout de **Pillow**), Swagger.
+
+**Tests** : 27 tests unitaires (dont 5 sur le traitement d'image : recadrage,
+suppression GPS vérifiée, PNG transparent, fichier piégé, 2 Mo, `../`) +
+scénario réel **30/30** (envoi, affichage, 3 réglages de confidentialité,
+remplacement, refus, chemin piégé, blocage, suppression du compte).
+
 ---
 
 ## Réorganisation du projet
@@ -571,7 +617,7 @@ gbekoun_backend/
 ├── scripts/create_admin.py # Création du premier administrateur
 ├── tests/e2e/              # Tests (sans base de données)
 ├── docs/                   # CORRECTIONS.md (ce fichier), DEMARRAGE.md
-├── Dockerfile              # Image de production (Render)
+├── Dockerfile              # Image de l'API (production)
 └── docker-compose.yml      # Environnement local complet
 ```
 
@@ -616,7 +662,7 @@ les identifiants Render en clair : à supprimer après la rotation du mot de pas
 Le dossier `uploads/` appartient à root (créé par Docker) ; il est ignoré par Git.
 
 **Autres fichiers modifiés** : `Dockerfile` (plus de `gcc`/`g++`/`curl` inutiles,
-logs non bufferisés), `.dockerignore` (désormais versionné pour que Render
+logs non bufferisés), `.dockerignore` (désormais versionné pour que le build
 l'utilise ; exclut secrets, tests, docs), `.gitignore` (nettoyé, doublons retirés).
 
 ---
@@ -706,10 +752,11 @@ Le fichier reste ignoré par Git (choix existant dans `.gitignore`).
 ## Reste à faire
 
 Déjà traités : point 1 (connexion liée à l'appareil, accès PC admin), R1
-(recherche), R2 (echo/health), R3 (diffusion REST), confidentialité
-`privacy_about` et photo « contacts » (avec R1).
+(recherche), R2 (echo/health), R3 (diffusion REST), R4 (photo de profil),
+confidentialité `privacy_about` et photo « contacts » (avec R1).
 
-1. Aucune route d'upload (photo de profil, médias) — cf. PDF d'observations.
+1. Upload des médias du chat (images, vidéos, fichiers) : la photo de profil
+   est faite (R4), les médias des messages restent à faire.
 2. « Supprimer » un groupe = le quitter sans les contrôles de `leave` (le dernier
    admin peut partir et laisser le groupe sans admin).
 3. Les messages ne contiennent que `sender_id` ; pour les groupes, ajouter le

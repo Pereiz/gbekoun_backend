@@ -13,6 +13,7 @@ from core.database import execute_query, messages_col, transaction
 from core.http import error_response
 from core.realtime import disconnect_user
 from core.security import require_admin, require_auth
+from services.media import delete_avatar_file
 from services.devices import (
     KIND_WEB,
     create_activation_code,
@@ -332,6 +333,10 @@ def delete_user(user_id):
     
     # Supprimer tous les messages de l'utilisateur dans MongoDB
     messages_col.delete_many({'sender_id': user_id})
+
+    # Supprimer sa photo de profil du disque
+    avatar = execute_query("SELECT avatar_url FROM gbekoun.users WHERE id = %s", (user_id,), fetch_one=True)
+    delete_avatar_file(avatar and avatar['avatar_url'])
     
     # Supprimer l'utilisateur de PostgreSQL (hard delete)
     execute_query(sql.SQL("""DELETE FROM gbekoun.users WHERE id = %s"""), (user_id,))

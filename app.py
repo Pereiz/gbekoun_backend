@@ -89,6 +89,7 @@ from blueprints.admin import admin_bp  # noqa: E402
 from blueprints.auth import auth_bp  # noqa: E402
 from blueprints.conversations import conversations_bp  # noqa: E402
 from blueprints.devices import devices_bp  # noqa: E402
+from blueprints.media import media_bp  # noqa: E402
 from blueprints.messages import messages_bp  # noqa: E402
 from blueprints.status import cleanup_inactive_users, status_bp  # noqa: E402
 from blueprints.users import users_bp  # noqa: E402
@@ -102,6 +103,7 @@ app.register_blueprint(admin_bp)
 app.register_blueprint(users_bp)
 app.register_blueprint(status_bp)
 app.register_blueprint(utils_bp)
+app.register_blueprint(media_bp)
 
 
 @app.errorhandler(ApiError)

@@ -1,0 +1,11 @@
+Retirer sa photo de profil
+---
+tags:
+  - Utilisateurs
+responses:
+  200:
+    description: Photo retirée
+    schema:
+      type: object
+      properties:
+        avatar_url: {type: string, example: null}

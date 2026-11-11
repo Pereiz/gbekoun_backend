@@ -18,5 +18,8 @@ dnspython==2.8.0          # requis pour les URI mongodb+srv:// (Atlas)
 PyJWT==2.8.0
 python-dotenv==1.0.0
 
+# Images (photos de profil : vérification, redimensionnement, suppression EXIF)
+Pillow==11.0.0
+
 # Métriques admin
 psutil==7.2.2

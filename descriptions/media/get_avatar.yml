@@ -1,0 +1,25 @@
+Afficher une photo de profil
+URL fournie par le champ `avatar_url` des profils. Authentification requise : envoyer
+l'en-tête Authorization en chargeant l'image (ex. expo-image :
+source={{ uri: API_URL + avatar_url, headers: { Authorization: 'Bearer ' + token } }}).
+Le réglage de confidentialité de la photo est appliqué (everyone / contacts / nobody) ;
+404 si l'image n'est pas visible, si ce n'est plus la photo actuelle, ou en cas de blocage.
+---
+tags:
+  - Utilisateurs
+produces:
+  - image/jpeg
+parameters:
+  - name: user_id
+    in: path
+    type: string
+    required: true
+  - name: filename
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Image JPEG 512×512 (Cache-Control private, 24 h)
+  404:
+    description: NOT_FOUND

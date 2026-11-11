@@ -7,8 +7,9 @@ Le backend est composé de **3 parties** :
 | Partie | Rôle | Port local |
 |--------|------|-----------|
 | **API Flask + Socket.IO** (`app.py`) | Routes REST `/api/...`, temps réel `/socket.io/`, doc Swagger `/apidocs/` | `8880` |
-| **PostgreSQL** (schéma `gbekoun`) | Utilisateurs, conversations, participants, codes d'invitation, blocages, signalements, jetons push | `5435` (Docker) |
+| **PostgreSQL** (schéma `gbekoun`) | Utilisateurs, appareils, conversations, participants, codes d'invitation, blocages, signalements, jetons push | `5435` (Docker) |
 | **MongoDB** (base `gbekoundb_messages`) | Contenu des messages (texte, réponses, réactions, suppressions) | `27020` (Docker) |
+| **Fichiers** (`UPLOAD_FOLDER`, volume `uploads_data`) | Photos de profil (JPEG 512×512) | — |
 
 Prérequis : **Docker** + **Docker Compose**, et pour le mode « Python local » :
 **Python 3.11+**.
@@ -17,7 +18,7 @@ Trois façons de démarrer :
 
 - [Option A — Tout dans Docker](#option-a--tout-dans-docker-le-plus-simple) (le plus simple)
 - [Option B — API en Python local, bases dans Docker](#option-b--api-en-python-local-bases-dans-docker) (le plus pratique pour développer)
-- [Production (Render)](#production-render)
+- [Production (serveur perso, tout en Docker)](#production-serveur-perso-tout-en-docker)
 
 ---
 
@@ -267,10 +268,16 @@ FLASK_DEBUG=1 python tests/e2e/test_message_flow.py -v
 
 ---
 
-## Production (Render)
+## Production (serveur perso, tout en Docker)
 
-Render construit l'image à partir du **`Dockerfile`** (le `docker-compose.yml`
-n'est pas utilisé). La commande lancée est :
+> **Render n'est plus utilisé** (décision du 11/11/2026). Le déploiement se fait
+> sur une machine distante, entièrement en Docker, avec des **volumes
+> persistants** pour PostgreSQL, MongoDB et les fichiers envoyés (photos de profil).
+> Un `docker-compose` dédié à la production (reverse proxy HTTPS, redémarrage
+> automatique, sauvegardes) reste à écrire.
+
+Le `docker-compose.yml` actuel lance déjà les trois services avec leurs
+volumes (`postgres_data`, `mongo_data`, `uploads_data`). L'API tourne avec :
 
 ```
 gunicorn --worker-class gthread --workers 1 --threads 100 --bind 0.0.0.0:$PORT app:app
@@ -280,35 +287,33 @@ gunicorn --worker-class gthread --workers 1 --threads 100 --bind 0.0.0.0:$PORT a
 > du process. Pour passer à plusieurs workers/instances, il faudra un message
 > queue (Redis) pour Socket.IO.
 
-**Variables d'environnement à définir sur Render :**
+**Variables d'environnement (fichier `.env` du serveur) :**
 
 | Variable | Obligatoire | Exemple / remarque |
 |----------|:-----------:|--------------------|
 | `SECRET_KEY` | ✅ | valeur aléatoire (le démarrage échoue sans) |
 | `JWT_SECRET` | ✅ | valeur aléatoire (le démarrage échoue sans) |
-| `PG_PASSWORD` | ✅ | mot de passe de la base Render (le démarrage échoue sans) |
-| `PG_HOST` | ✅ | hôte interne Render (`dpg-...`) |
-| `PG_PORT` | | `5432` (défaut) |
-| `PG_DATABASE` | | `gbekoundb` (défaut) |
-| `PG_USER` | | `gbekoundb_user` (défaut) |
-| `MONGO_URI` | ✅ | URI MongoDB Atlas (`mongodb+srv://...`) |
+| `PG_PASSWORD` | ✅ | mot de passe PostgreSQL (le démarrage échoue sans) |
+| `PG_DATABASE`, `PG_USER` | | `gbekoundb`, `gbekoundb_user` |
+| `MONGO_ROOT_USER`, `MONGO_ROOT_PASSWORD` | ✅ | compte du conteneur MongoDB |
 | `MONGO_DB` | | `gbekoundb_messages` (défaut) |
+| `UPLOAD_FOLDER` | | `/app/uploads` dans le conteneur (volume `uploads_data`) |
+| `CORS_ORIGINS` | | domaine(s) de l'interface admin web, ex. `https://admin.gbekoun.example`. Vide = aucun site web autorisé (l'appli mobile fonctionne quand même). |
 | `EXPO_ACCESS_TOKEN` | | si l'accès sécurisé aux push Expo est activé |
-| `CORS_ORIGINS` | | domaine(s) de l'interface admin web, séparés par des virgules, ex. `https://admin.gbekoun.example`. Vide = aucun site web autorisé (l'appli mobile fonctionne quand même). |
 | `FLASK_DEBUG` | | ne pas définir (ou `0`) en production |
 
-**Mettre à jour le schéma de la base de production** (ajoute ce qui manque,
+**Mettre à jour le schéma d'une base existante** (ajoute ce qui manque,
 n'efface rien) :
 
 ```bash
-psql "<External Database URL de Render>" -f database/postgres/schema.sql
-mongosh "<MONGO_URI Atlas>" database/mongo/init.js
+docker compose exec -T postgres psql -U "$PG_USER" -d "$PG_DATABASE" < database/postgres/schema.sql
+docker compose exec -T mongo mongosh -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASSWORD" < database/mongo/init.js
 ```
 
-**Sauvegardes** : la route `POST /api/admin/backup/create` nécessite
-`pg_dump` et `mongodump` sur le serveur (absents de l'image Docker : elle
-répond alors `501`). Sur Render, utiliser plutôt les sauvegardes automatiques
-de la base managée, et celles d'Atlas pour MongoDB.
+**Volumes à sauvegarder** : `postgres_data`, `mongo_data` et `uploads_data`
+(les photos de profil ne sont que sur ce volume). La route
+`POST /api/admin/backup/create` nécessite `pg_dump` et `mongodump` dans le
+conteneur de l'API (absents de l'image actuelle : elle répond `501`).
 
 ---
 
