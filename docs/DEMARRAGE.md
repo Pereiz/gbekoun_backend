@@ -322,6 +322,8 @@ de la base managée, et celles d'Atlas pour MongoDB.
 | `Authentication failed` côté MongoDB | `MONGO_URI` ne correspond pas à `MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD`, ou le volume Mongo a été créé avec d'autres identifiants (`docker compose down -v`). |
 | `401 Compte introuvable ou supprimé` avec un token valide | Le compte a été supprimé, ou le token vient d'une autre base. |
 | `401 DEVICE_REVOKED` | Un autre appareil a été activé sur ce compte (ou l'admin a révoqué celui-ci). Réactiver l'appareil. |
+| `401 SESSION_EXPIRED` (PC) | L'heure de session est écoulée sans prolongation confirmée sur le téléphone : se reconnecter. |
+| `401 SESSION_IDLE` (PC) | Aucune requête du PC depuis 5 min : se reconnecter. |
 | `403 WEB_ADMIN_ONLY` | Appel d'une route hors administration depuis un PC (normal), ou compte non admin qui tente d'ouvrir une session PC. |
 | L'interface admin web est bloquée par le navigateur (erreur CORS) | Son domaine n'est pas dans `CORS_ORIGINS`. |
 | `403 DEVICE_NOT_RECOGNIZED` au login | Ce `device_secret` n'est pas celui de l'appareil du compte : passer par la validation de l'ancien appareil ou un code admin. |

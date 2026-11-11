@@ -68,7 +68,9 @@ def _deliver_device_approval_push(user_id, request_payload):
         if not devices:
             return
         device_label = request_payload.get('device_name') or 'un nouvel appareil'
-        if request_payload.get('kind') == 'web':
+        if request_payload.get('purpose') == 'extend':
+            body = f'Prolonger d\'1 h la session administration sur {device_label} ?'
+        elif request_payload.get('kind') == 'web':
             body = f'Autoriser l\'accès administration sur {device_label} (1 h) ?'
         else:
             body = f'Autoriser la connexion sur {device_label} ? Ce téléphone sera déconnecté.'

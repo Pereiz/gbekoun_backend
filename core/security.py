@@ -24,10 +24,13 @@ SESSION_ACTIVE = 'active'
 SESSION_SUSPENDED = 'suspended'
 SESSION_ACCOUNT_MISSING = 'account_missing'
 SESSION_DEVICE_REVOKED = 'device_revoked'
+SESSION_EXPIRED = 'session_expired'     # PC : 1 h écoulée sans prolongation
+SESSION_IDLE = 'session_idle'           # PC : aucune requête depuis 5 min
 
 KIND_MOBILE = 'mobile'
 KIND_WEB = 'web'
 WEB_TOKEN_TTL = timedelta(hours=1)
+WEB_IDLE_TIMEOUT = timedelta(minutes=5)
 
 # Routes accessibles depuis le PC d'un admin (tout le reste → 403 WEB_ADMIN_ONLY).
 _WEB_ALLOWED_PREFIXES = ('/api/admin/', '/api/auth/invite-codes')
@@ -36,6 +39,7 @@ _WEB_ALLOWED_ROUTES = {
     ('POST', '/api/auth/logout'),
     ('GET', '/api/auth/device'),
     ('POST', '/api/auth/device/web/revoke'),
+    ('POST', '/api/auth/device/web/extend'),
     ('GET', '/api/users/me'),
 }
 
@@ -80,25 +84,40 @@ def get_session_state(user_id, device_id):
     Retourne (état, type_d_appareil). Le type vient de la base, pas du token.
     """
     row = execute_query("""
-        SELECT u.is_suspended, u.deleted_at, u.is_admin, d.kind AS device_kind
+        SELECT u.is_suspended, u.deleted_at, u.is_admin,
+               d.kind AS device_kind,
+               d.revoked_at IS NOT NULL AS device_revoked,
+               COALESCE(d.expires_at <= NOW(), FALSE) AS session_expired,
+               (d.kind = 'web' AND COALESCE(d.last_seen_at < NOW() - %s, TRUE)) AS session_idle
         FROM gbekoun.users u
-        LEFT JOIN gbekoun.user_devices d
-               ON d.id = %s AND d.user_id = u.id AND d.revoked_at IS NULL
-              AND (d.expires_at IS NULL OR d.expires_at > NOW())
+        LEFT JOIN gbekoun.user_devices d ON d.id = %s AND d.user_id = u.id
         WHERE u.id = %s
-    """, (device_id, user_id), fetch_one=True)
+    """, (WEB_IDLE_TIMEOUT, device_id, user_id), fetch_one=True)
 
     if not row or row.get('deleted_at'):
         return SESSION_ACCOUNT_MISSING, None
     if row.get('is_suspended'):
         return SESSION_SUSPENDED, None
     kind = row.get('device_kind')
-    if not kind:
+    if not kind or row.get('device_revoked'):
         return SESSION_DEVICE_REVOKED, None
-    if kind == KIND_WEB and not row.get('is_admin'):
-        # Plus admin : l'accès PC tombe automatiquement.
-        return SESSION_DEVICE_REVOKED, None
+    if kind == KIND_WEB:
+        if not row.get('is_admin'):
+            # Plus admin : l'accès PC tombe automatiquement.
+            return SESSION_DEVICE_REVOKED, None
+        if row.get('session_expired'):
+            return SESSION_EXPIRED, None
+        if row.get('session_idle'):
+            return SESSION_IDLE, None
     return SESSION_ACTIVE, kind
+
+
+def touch_web_session(device_id):
+    """Chaque requête du PC repousse le délai d'inactivité de 5 min."""
+    execute_query(
+        "UPDATE gbekoun.user_devices SET last_seen_at = NOW() WHERE id = %s",
+        (device_id,)
+    )
 
 
 def _web_route_allowed():
@@ -112,8 +131,14 @@ _SESSION_ERRORS = {
     SESSION_ACCOUNT_MISSING: ('Compte introuvable ou supprimé', 401, 'ACCOUNT_NOT_FOUND'),
     SESSION_SUSPENDED: ('Compte suspendu', 403, 'ACCOUNT_SUSPENDED'),
     SESSION_DEVICE_REVOKED: (
-        'Cet appareil n\'est plus autorisé (remplacé, révoqué ou session expirée).',
-        401, 'DEVICE_REVOKED'
+        'Cet appareil n\'est plus autorisé (remplacé ou révoqué).', 401, 'DEVICE_REVOKED'
+    ),
+    SESSION_EXPIRED: (
+        'Session d\'administration expirée (1 h). Validez une nouvelle connexion sur votre téléphone.',
+        401, 'SESSION_EXPIRED'
+    ),
+    SESSION_IDLE: (
+        'Session d\'administration fermée après 5 minutes d\'inactivité.', 401, 'SESSION_IDLE'
     ),
 }
 
@@ -139,6 +164,9 @@ def require_auth(f):
             return error_response(
                 'Depuis un PC, seule l\'administration est accessible.', 403, 'WEB_ADMIN_ONLY'
             )
+
+        if kind == KIND_WEB:
+            touch_web_session(claims['device_id'])
 
         g.current_user_id = claims['user_id']
         g.current_device_id = claims['device_id']

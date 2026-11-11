@@ -321,6 +321,7 @@ sockets sont fermés, ses jetons de notification push sont désactivés.
 | POST | `/api/auth/device/web/activate` | PC d'un admin (code de secours) |
 | GET | `/api/auth/device/web` | téléphone de l'admin (PC connecté ?) |
 | POST | `/api/auth/device/web/revoke` | téléphone ou PC (fermer la session PC) |
+| POST | `/api/auth/device/web/extend` | PC (demander +1 h, à confirmer sur le téléphone) |
 
 Nouvel événement Socket.IO : `device_approval_requested` (vers l'appareil actif).
 Toutes les erreurs d'authentification portent désormais un `code`
@@ -360,6 +361,38 @@ déconnecte son téléphone, et le PC ne doit servir **qu'à l'administration**.
 | Contrôle à distance | Depuis le téléphone : `GET /api/auth/device/web` (PC connecté ?) et `POST /api/auth/device/web/revoke` (« Déconnecter le PC »). |
 | Perte des droits | Admin rétrogradé → session PC révoquée immédiatement (et refusée par le contrôle de session dans tous les cas). |
 
+**Fin de session, prolongation et inactivité.**
+
+| Situation | Comportement |
+|-----------|--------------|
+| 1 min avant la fin de l'heure | L'interface web affiche « Vous serez déconnecté dans 1 min. Garder la session ? » (elle connaît `session_expires_at`). |
+| L'admin clique « Oui » | Le PC appelle `POST /api/auth/device/web/extend` ; le téléphone reçoit « Prolonger d'1 h la session administration sur Chrome - Windows ? ». |
+| Confirmé sur le téléphone avant l'échéance | Session prolongée d'1 h à partir de la confirmation ; le PC récupère un **nouveau token** via `/requests/<id>/status`. Même appareil, pas de nouvelle activation. |
+| Pas de confirmation (ou refus) avant l'échéance | La session se ferme à l'heure prévue : `401 SESSION_EXPIRED`. Une confirmation trop tardive est refusée (`409`). |
+| Aucune requête du PC pendant **5 min** | Session fermée : `401 SESSION_IDLE`. Chaque requête du PC remet le compteur à zéro. |
+
+- La demande de prolongation expire au plus tard avec la session (impossible
+  de prolonger une session déjà terminée).
+- Les prolongations **ne comptent pas** dans la limite de 5 demandes de
+  connexion par heure (elles viennent d'un PC déjà connecté).
+- Le téléphone n'a ni durée de session ni délai d'inactivité.
+
+> **Pourquoi l'alerte « 1 min » est affichée par l'interface web et non
+> envoyée par le serveur ?** L'interface connaît l'heure exacte de fin
+> (`session_expires_at`) dès la connexion : un simple minuteur suffit, sans
+> connexion temps réel ouverte côté PC (le PC n'a volontairement pas accès à
+> Socket.IO). Elle peut afficher un bandeau dans la page et, si l'onglet est en
+> arrière-plan, une notification du navigateur (API `Notification`). Le serveur,
+> lui, **applique** les échéances quoi qu'il arrive.
+
+> **Inactivité, côté interface.** Le serveur compte comme activité toute
+> requête du PC. L'interface ne doit donc **pas** faire d'appels automatiques
+> en arrière-plan (rafraîchissement périodique) sans action de l'admin, sinon
+> la session ne serait jamais « inactive ». L'interrogation de
+> `/requests/<id>/status` ne compte pas (elle n'utilise pas le token).
+> Recommandé en plus : détecter l'inactivité clavier/souris dans la page et
+> appeler `POST /api/auth/device/web/revoke` au bout de 5 min.
+
 **CORS.** Avant, n'importe quel site pouvait appeler l'API depuis un
 navigateur (`*`). Désormais, seuls les sites listés dans `CORS_ORIGINS` sont
 autorisés (exemple : `https://admin.gbekoun.example`, à remplacer par le vrai
@@ -373,10 +406,13 @@ L'application mobile n'est pas concernée (CORS ne s'applique qu'aux navigateurs
   « Validez sur votre téléphone » ;
 - afficher le compte à rebours de `session_expires_at`.
 
-**Note.** La limite de 5 demandes par heure est commune au téléphone et au
-PC. Un inconnu qui connaît le numéro de l'admin pourrait épuiser ce quota et
-retarder sa connexion PC d'une heure (sans jamais obtenir d'accès). Le code
-de secours (`/web/activate`) n'est pas concerné par ce quota.
+**Note.** La limite de 5 demandes de connexion par heure (téléphone et PC
+confondus) protège le titulaire contre une avalanche de fausses demandes. En
+contrepartie, un inconnu qui connaît le numéro de l'admin peut envoyer 5
+fausses demandes et empêcher l'admin d'ouvrir une **nouvelle** session PC
+pendant 1 h (sans jamais obtenir d'accès : l'admin refuse simplement ces
+demandes). Une session PC déjà ouverte peut toujours être prolongée, et le
+code de secours reste utilisable.
 
 **Fichiers modifiés** : `services/devices.py` (types `mobile`/`web`, session 1 h),
 `core/security.py` (restriction des routes, expiration serveur, admin requis),
@@ -393,6 +429,12 @@ routes d'admin OK et le reste refusé, chat refusé, un PC ne peut pas valider,
 un nouveau PC remplace l'ancien, déconnexion du PC depuis le téléphone ou
 depuis le PC, expiration côté serveur, utilisateur normal refusé, code de
 secours, admin rétrogradé, changement de téléphone sans couper le PC, CORS).
+
+Prolongation et inactivité : 20 tests unitaires (dont 3 nouveaux) + scénario
+réel **27/27** (prolongation confirmée → +1 h et nouveau token ; non confirmée
+→ fermeture à l'échéance ; confirmation tardive refusée ; refus ; 4 min 50
+d'inactivité → toujours connecté, 5 min → `SESSION_IDLE` ; prolongations hors
+quota ; téléphone jamais soumis à l'inactivité).
 
 ---
 

@@ -14,6 +14,12 @@ Validation par le téléphone actif
    téléphone : POST /api/auth/device/requests/<id>/approve   (ou /reject)
    demandeur : POST /api/auth/device/requests/<id>/status    → token quand approuvé
 
+Prolonger la session PC (1 h de plus), à proposer 1 min avant la fin
+   PC        : POST /api/auth/device/web/extend      → request_id (purpose = extend)
+   téléphone : approuve comme ci-dessus
+   PC        : POST /api/auth/device/requests/<id>/status → nouveau token
+Inactivité : sans aucune requête du PC pendant 5 min, la session est fermée.
+
 Secours : code donné par un administrateur (téléphone perdu/inaccessible)
    admin     : POST /api/admin/users/<user_id>/activation-code
    demandeur : POST /api/auth/device/activate         (téléphone)
@@ -32,6 +38,7 @@ from core.realtime import user_room
 from core.security import generate_token, require_auth
 from services.devices import (
     ACTIVATION_CODE_MAX_ATTEMPTS,
+    WEB_SESSION_TTL,
     APPROVAL_REQUEST_TTL,
     APPROVAL_REQUESTS_PER_HOUR,
     KIND_MOBILE,
@@ -49,8 +56,15 @@ from utils.message_helpers import to_utc_isoformat
 
 devices_bp = Blueprint('devices', __name__, url_prefix='/api/auth/device')
 
-# Un appareil est « actif » s'il n'est pas révoqué et (pour un PC) pas expiré.
-_ACTIVE_DEVICE_SQL = "revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())"
+# Un appareil est « actif » s'il n'est pas révoqué et, pour un PC, ni expiré
+# (1 h) ni inactif depuis plus de 5 min.
+_ACTIVE_DEVICE_SQL = (
+    "revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW()) "
+    "AND (kind <> 'web' OR last_seen_at > NOW() - INTERVAL '5 minutes')"
+)
+
+PURPOSE_ACTIVATE = 'activate'
+PURPOSE_EXTEND = 'extend'
 
 
 def _iso(value):
@@ -105,6 +119,8 @@ def _device_info(device):
         'activated_at': _iso(device['created_at']),
         'last_seen_at': _iso(device['last_seen_at']),
         'session_expires_at': _iso(device['expires_at']),
+        # PC : fermé si aucune requête pendant ce délai
+        'idle_timeout_seconds': 300 if device['kind'] == KIND_WEB else None,
     }
 
 
@@ -231,9 +247,10 @@ def _create_approval_request(kind):
             raise ApiError('DEVICE_ALREADY_ACTIVE', 'Cet appareil est déjà actif : connectez-vous.', 409)
 
         # Limite anti-harcèlement : on ne peut pas inonder le téléphone de demandes.
+        # Les prolongations de session (demandées par un PC déjà connecté) ne comptent pas.
         cur.execute("""
             SELECT COUNT(*) AS n FROM gbekoun.device_approval_requests
-            WHERE user_id = %s AND created_at > NOW() - INTERVAL '1 hour'
+            WHERE user_id = %s AND purpose = 'activate' AND created_at > NOW() - INTERVAL '1 hour'
         """, (user_id,))
         if cur.fetchone()['n'] >= APPROVAL_REQUESTS_PER_HOUR:
             raise ApiError('TOO_MANY_REQUESTS', 'Trop de demandes. Réessayez plus tard.', 429)
@@ -242,7 +259,7 @@ def _create_approval_request(kind):
         cur.execute("""
             UPDATE gbekoun.device_approval_requests
             SET status = 'expired', decided_at = NOW()
-            WHERE user_id = %s AND kind = %s AND status = 'pending'
+            WHERE user_id = %s AND kind = %s AND purpose = 'activate' AND status = 'pending'
         """, (user_id, kind))
 
         cur.execute("""
@@ -257,6 +274,7 @@ def _create_approval_request(kind):
     payload = {
         'request_id': request_id,
         'kind': kind,
+        'purpose': PURPOSE_ACTIVATE,
         'device_name': device['device_name'],
         'platform': device['platform'],
         'requested_at': _iso(created['created_at']),
@@ -301,7 +319,7 @@ def approval_request_status(request_id):
         raise ApiError('REQUEST_NOT_FOUND', 'Demande introuvable', 404)
 
     row = execute_query("""
-        SELECT r.id, r.user_id, r.secret_hash, r.approved_device_id, r.kind,
+        SELECT r.id, r.user_id, r.secret_hash, r.approved_device_id, r.kind, r.purpose,
                CASE WHEN r.status = 'pending' AND r.expires_at <= NOW() THEN 'expired'
                     ELSE r.status END AS status,
                u.display_name, u.username
@@ -315,7 +333,8 @@ def approval_request_status(request_id):
         raise ApiError('REQUEST_NOT_FOUND', 'Demande introuvable', 404)
 
     if row['status'] != 'approved':
-        return jsonify({'request_id': request_id, 'status': row['status']}), 200
+        return jsonify({'request_id': request_id, 'purpose': row['purpose'],
+                        'status': row['status']}), 200
 
     device = execute_query(f"""
         SELECT id FROM gbekoun.user_devices
@@ -326,7 +345,7 @@ def approval_request_status(request_id):
         return jsonify({'request_id': request_id, 'status': 'expired'}), 200
 
     user = {'id': row['user_id'], 'display_name': row['display_name'], 'username': row['username']}
-    return jsonify({'request_id': request_id, 'status': 'approved',
+    return jsonify({'request_id': request_id, 'purpose': row['purpose'], 'status': 'approved',
                     **_session_payload(user, str(device['id']), row['kind'])}), 200
 
 
@@ -337,7 +356,7 @@ def pending_approval_requests():
     """Le téléphone actif récupère les demandes en attente (à l'ouverture de l'appli)."""
     _require_mobile()
     rows = execute_query("""
-        SELECT id, kind, device_name, platform, created_at, expires_at
+        SELECT id, kind, purpose, device_name, platform, created_at, expires_at
         FROM gbekoun.device_approval_requests
         WHERE user_id = %s AND status = 'pending' AND expires_at > NOW()
         ORDER BY created_at DESC
@@ -345,6 +364,7 @@ def pending_approval_requests():
     return jsonify([{
         'request_id': str(r['id']),
         'kind': r['kind'],
+        'purpose': r['purpose'],
         'device_name': r['device_name'],
         'platform': r['platform'],
         'requested_at': _iso(r['created_at']),
@@ -364,6 +384,7 @@ def _decide(request_id, approve):
         lock_user_devices(cur, g.current_user_id)
         cur.execute("""
             SELECT r.id, r.secret_hash, r.device_name, r.platform, r.kind, r.status,
+                   r.purpose, r.target_device_id,
                    r.expires_at <= NOW() AS expired, u.is_admin
             FROM gbekoun.device_approval_requests r
             JOIN gbekoun.users u ON u.id = r.user_id
@@ -379,7 +400,22 @@ def _decide(request_id, approve):
         if approve and pending['kind'] == KIND_WEB and not pending['is_admin']:
             raise ApiError('WEB_ADMIN_ONLY', 'L\'accès depuis un PC est réservé aux administrateurs.', 403)
 
-        if approve:
+        if approve and pending['purpose'] == PURPOSE_EXTEND:
+            # Prolonger la session PC en cours (encore active) d'1 h à partir de maintenant.
+            cur.execute(f"""
+                UPDATE gbekoun.user_devices
+                SET expires_at = NOW() + %s, last_seen_at = NOW()
+                WHERE id = %s AND kind = 'web' AND {_ACTIVE_DEVICE_SQL}
+                RETURNING id
+            """, (WEB_SESSION_TTL, pending['target_device_id']))
+            if not cur.fetchone():
+                raise ApiError('SESSION_EXPIRED', 'La session PC a déjà expiré : reconnectez le PC.', 409)
+            cur.execute("""
+                UPDATE gbekoun.device_approval_requests
+                SET status = 'approved', approved_device_id = target_device_id, decided_at = NOW()
+                WHERE id = %s
+            """, (request_id,))
+        elif approve:
             device_id, revoked_ids = bind_device(cur, g.current_user_id, pending, 'replaced_by_approval')
             cur.execute("""
                 UPDATE gbekoun.device_approval_requests
@@ -396,7 +432,7 @@ def _decide(request_id, approve):
     # Nouveau téléphone approuvé : le téléphone qui vient d'approuver est révoqué
     # et ses sockets fermés. PC approuvé : seul l'ancien PC est révoqué.
     disconnect_devices(revoked_ids)
-    return jsonify({'request_id': request_id, 'kind': pending['kind'],
+    return jsonify({'request_id': request_id, 'kind': pending['kind'], 'purpose': pending['purpose'],
                     'status': 'approved' if approve else 'rejected'}), 200
 
 
@@ -428,6 +464,65 @@ def get_web_session():
         WHERE user_id = %s AND kind = 'web' AND {_ACTIVE_DEVICE_SQL}
     """, (g.current_user_id,), fetch_one=True)
     return jsonify({'web_session': _device_info(device)}), 200
+
+
+@devices_bp.route('/web/extend', methods=['POST'])
+@require_auth
+@swag_from('../descriptions/devices/web_extend.yml')
+def request_web_extension():
+    """Depuis le PC : demander au téléphone de prolonger la session d'1 h.
+
+    L'interface web le propose 1 minute avant `session_expires_at`. Sans
+    confirmation sur le téléphone avant l'échéance, la session se ferme.
+    """
+    if g.current_device_kind != KIND_WEB:
+        raise ApiError('WEB_ONLY', 'Réservé à une session PC.', 403)
+
+    request_id = str(uuid.uuid4())
+    with transaction() as cur:
+        lock_user_devices(cur, g.current_user_id)
+        cur.execute("""
+            SELECT secret_hash, device_name, platform, expires_at
+            FROM gbekoun.user_devices WHERE id = %s
+        """, (g.current_device_id,))
+        device = cur.fetchone()
+
+        # Une seule demande de prolongation en attente à la fois.
+        cur.execute("""
+            UPDATE gbekoun.device_approval_requests
+            SET status = 'expired', decided_at = NOW()
+            WHERE user_id = %s AND purpose = 'extend' AND status = 'pending'
+        """, (g.current_user_id,))
+
+        # La demande expire avec la session : inutile de valider après la fin.
+        cur.execute("""
+            INSERT INTO gbekoun.device_approval_requests
+                (id, user_id, secret_hash, device_name, platform, kind, purpose,
+                 target_device_id, expires_at)
+            VALUES (%s, %s, %s, %s, %s, 'web', 'extend', %s, LEAST(NOW() + %s, %s))
+            RETURNING created_at, expires_at
+        """, (request_id, g.current_user_id, device['secret_hash'], device['device_name'],
+              device['platform'], g.current_device_id, APPROVAL_REQUEST_TTL, device['expires_at']))
+        created = cur.fetchone()
+
+    payload = {
+        'request_id': request_id,
+        'kind': KIND_WEB,
+        'purpose': PURPOSE_EXTEND,
+        'device_name': device['device_name'],
+        'platform': device['platform'],
+        'requested_at': _iso(created['created_at']),
+        'expires_at': _iso(created['expires_at']),
+    }
+    socketio.emit('device_approval_requested', payload, room=user_room(g.current_user_id))
+    notify_device_approval_requested(g.current_user_id, payload)
+
+    return jsonify({
+        'request_id': request_id,
+        'status': 'pending',
+        'expires_at': payload['expires_at'],
+        'session_expires_at': _iso(device['expires_at']),
+    }), 201
 
 
 @devices_bp.route('/web/revoke', methods=['POST'])

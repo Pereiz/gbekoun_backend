@@ -13,6 +13,7 @@ responses:
         properties:
           request_id: {type: string}
           kind: {type: string, enum: [mobile, web], description: "mobile = nouveau téléphone (ce téléphone sera déconnecté) ; web = accès administration depuis un PC (1 h)"}
+          purpose: {type: string, enum: [activate, extend], description: "extend = prolonger d'1 h la session PC en cours"}
           device_name: {type: string, example: "iPhone 13"}
           platform: {type: string, example: ios}
           requested_at: {type: string}

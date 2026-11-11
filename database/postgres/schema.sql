@@ -182,7 +182,8 @@ CREATE TABLE IF NOT EXISTS gbekoun.push_devices (
 
 -- -------------------------------------------------------------
 -- Appareils : un seul appareil mobile actif par compte
--- (+ pour les admins seulement : une session web d'administration, 1 h max)
+-- (+ pour les admins seulement : une session web d'administration, 1 h max,
+--  prolongeable depuis le téléphone, coupée après 5 min d'inactivité)
 -- (équivalent de database/migrations/002_user_devices.sql)
 -- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS gbekoun.user_devices (
@@ -194,7 +195,7 @@ CREATE TABLE IF NOT EXISTS gbekoun.user_devices (
         CHECK (kind IN ('mobile', 'web')),      -- web = PC, administration uniquement
     platform        VARCHAR(20) CHECK (platform IN ('android', 'ios', 'web')),
     created_at      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_seen_at    TIMESTAMP,
+    last_seen_at    TIMESTAMP,                  -- dernière requête (PC : inactif 5 min = déconnecté)
     expires_at      TIMESTAMP   NULL,           -- fin de session (web) ; NULL = pas de limite
     revoked_at      TIMESTAMP   NULL,           -- NULL = appareil actif
     revoked_reason  VARCHAR(50)
@@ -228,6 +229,9 @@ CREATE TABLE IF NOT EXISTS gbekoun.device_approval_requests (
     device_name         VARCHAR(100),
     platform            VARCHAR(20),
     kind                VARCHAR(10) NOT NULL DEFAULT 'mobile' CHECK (kind IN ('mobile', 'web')),
+    -- activate = connexion d'un nouvel appareil ; extend = prolonger la session PC en cours
+    purpose             VARCHAR(10) NOT NULL DEFAULT 'activate' CHECK (purpose IN ('activate', 'extend')),
+    target_device_id    UUID        REFERENCES gbekoun.user_devices(id) ON DELETE CASCADE,
     status              VARCHAR(20) NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
     approved_device_id  UUID        REFERENCES gbekoun.user_devices(id) ON DELETE SET NULL,

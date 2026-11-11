@@ -1,0 +1,26 @@
+Prolonger la session PC d'1 h (appelé par le PC, validé sur le téléphone)
+À proposer par l'interface web 1 minute avant `session_expires_at` (« Vous serez
+déconnecté dans 1 min. Garder la session ? »). Si l'admin clique « Oui » :
+appeler cette route, puis interroger POST /api/auth/device/requests/{request_id}/status
+toutes les 2-3 s. Le téléphone reçoit `device_approval_requested` avec
+purpose = "extend". Approuvé → la réponse de /status contient un NOUVEAU token
+et le nouveau session_expires_at (maintenant + 1 h). Sans validation avant
+l'échéance : la session se ferme (401 SESSION_EXPIRED).
+Ne compte pas dans la limite de 5 demandes de connexion par heure.
+---
+tags:
+  - Administration web
+responses:
+  201:
+    description: Demande envoyée au téléphone
+    schema:
+      type: object
+      properties:
+        request_id: {type: string}
+        status: {type: string, example: pending}
+        expires_at: {type: string, description: "La demande expire au plus tard avec la session"}
+        session_expires_at: {type: string}
+  401:
+    description: SESSION_EXPIRED ou SESSION_IDLE (trop tard), DEVICE_REVOKED
+  403:
+    description: WEB_ONLY (appelé depuis un téléphone)

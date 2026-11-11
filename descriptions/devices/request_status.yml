@@ -26,6 +26,7 @@ responses:
       type: object
       properties:
         request_id: {type: string}
+        purpose: {type: string, enum: [activate, extend]}
         status: {type: string, enum: [pending, approved, rejected, expired]}
         token: {type: string, description: "Présent seulement si approved"}
         user_id: {type: string}
