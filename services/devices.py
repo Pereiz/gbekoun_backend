@@ -8,6 +8,12 @@ Principe :
 - se connecter exige le numéro ET cette clé ;
 - un nouvel appareil s'active soit avec l'accord de l'ancien, soit avec un
   code donné par un administrateur. L'ancien appareil est alors révoqué.
+
+Deux types d'appareil (`kind`) :
+- `mobile` : le téléphone, un seul par compte, accès complet ;
+- `web` : le PC d'un ADMINISTRATEUR, un seul par admin, limité aux routes
+  d'administration, session de 1 h maximum. Activer le PC ne touche pas au
+  téléphone, et c'est le téléphone qui valide chaque connexion du PC.
 """
 import hashlib
 import hmac
@@ -17,7 +23,10 @@ from datetime import timedelta
 from core.http import ApiError
 from core.realtime import disconnect_device
 
-PLATFORMS = ('android', 'ios')
+KIND_MOBILE = 'mobile'
+KIND_WEB = 'web'
+MOBILE_PLATFORMS = ('android', 'ios')
+WEB_SESSION_TTL = timedelta(hours=1)
 DEVICE_SECRET_MIN_LENGTH = 32
 DEVICE_SECRET_MAX_LENGTH = 256
 DEVICE_NAME_MAX_LENGTH = 100
@@ -42,8 +51,8 @@ def secrets_match(value, expected_hash):
     return hmac.compare_digest(hash_secret(value), expected_hash or '')
 
 
-def parse_device_payload(data):
-    """Valide les champs appareil envoyés par l'application.
+def parse_device_payload(data, kind=KIND_MOBILE):
+    """Valide les champs appareil envoyés par l'application (ou l'interface web admin).
 
     Retourne {'secret_hash', 'device_name', 'platform'} ou lève ApiError.
     """
@@ -62,14 +71,18 @@ def parse_device_payload(data):
     if name is not None and (not isinstance(name, str) or len(name) > DEVICE_NAME_MAX_LENGTH):
         raise ApiError('INVALID_DEVICE_NAME', f'device_name : {DEVICE_NAME_MAX_LENGTH} caractères maximum')
 
-    platform = data.get('platform', 'android')
-    if platform not in PLATFORMS:
-        raise ApiError('INVALID_PLATFORM', 'platform doit valoir android ou ios')
+    if kind == KIND_WEB:
+        platform = 'web'
+    else:
+        platform = data.get('platform', 'android')
+        if platform not in MOBILE_PLATFORMS:
+            raise ApiError('INVALID_PLATFORM', 'platform doit valoir android ou ios')
 
     return {
         'secret_hash': hash_secret(secret),
         'device_name': name.strip() if isinstance(name, str) and name.strip() else None,
         'platform': platform,
+        'kind': kind,
     }
 
 
@@ -88,27 +101,31 @@ def lock_user_devices(cur, user_id):
 
 
 def bind_device(cur, user_id, device, reason):
-    """Enregistre `device` comme seul appareil actif du compte.
+    """Enregistre `device` comme seul appareil actif de son type (mobile ou web).
 
     À appeler dans une transaction, après lock_user_devices.
+    Un PC (web) ne révoque que l'ancien PC ; un téléphone ne révoque que l'ancien téléphone.
     Retourne (nouvel_id, [ids_révoqués]).
     """
+    kind = device.get('kind', KIND_MOBILE)
     cur.execute("""
         UPDATE gbekoun.user_devices
         SET revoked_at = NOW(), revoked_reason = %s
-        WHERE user_id = %s AND revoked_at IS NULL
+        WHERE user_id = %s AND kind = %s AND revoked_at IS NULL
         RETURNING id
-    """, (reason, user_id))
+    """, (reason, user_id, kind))
     revoked_ids = [str(row['id']) for row in cur.fetchall()]
 
     cur.execute("""
-        INSERT INTO gbekoun.user_devices (user_id, secret_hash, device_name, platform, last_seen_at)
-        VALUES (%s, %s, %s, %s, NOW())
+        INSERT INTO gbekoun.user_devices
+            (user_id, secret_hash, device_name, platform, kind, last_seen_at, expires_at)
+        VALUES (%s, %s, %s, %s, %s, NOW(), %s)
         RETURNING id
-    """, (user_id, device['secret_hash'], device['device_name'], device['platform']))
+    """, (user_id, device['secret_hash'], device['device_name'], device['platform'], kind,
+          None if kind == KIND_MOBILE else _web_expiry(cur)))
     device_id = str(cur.fetchone()['id'])
 
-    if revoked_ids:
+    if revoked_ids and kind == KIND_MOBILE:
         # L'ancien téléphone ne doit plus recevoir les notifications :
         # le nouvel appareil réenregistrera son jeton Expo après connexion.
         cur.execute("""
@@ -119,19 +136,28 @@ def bind_device(cur, user_id, device, reason):
     return device_id, revoked_ids
 
 
-def revoke_active_device(cur, user_id, reason):
-    """Révoque l'appareil actif sans le remplacer (perte, vol). Retourne les ids révoqués."""
+def _web_expiry(cur):
+    cur.execute("SELECT NOW() + %s AS expires_at", (WEB_SESSION_TTL,))
+    return cur.fetchone()['expires_at']
+
+
+def revoke_active_device(cur, user_id, reason, kind=None):
+    """Révoque sans remplacer (perte, vol, déconnexion du PC). kind=None : tous les types.
+
+    Retourne les ids révoqués.
+    """
     cur.execute("""
         UPDATE gbekoun.user_devices
         SET revoked_at = NOW(), revoked_reason = %s
-        WHERE user_id = %s AND revoked_at IS NULL
+        WHERE user_id = %s AND revoked_at IS NULL AND (%s::text IS NULL OR kind = %s)
         RETURNING id
-    """, (reason, user_id))
+    """, (reason, user_id, kind, kind))
     revoked_ids = [str(row['id']) for row in cur.fetchall()]
-    cur.execute("""
-        UPDATE gbekoun.push_devices SET is_active = FALSE, updated_at = NOW()
-        WHERE user_id = %s AND is_active = TRUE
-    """, (user_id,))
+    if kind in (None, KIND_MOBILE):
+        cur.execute("""
+            UPDATE gbekoun.push_devices SET is_active = FALSE, updated_at = NOW()
+            WHERE user_id = %s AND is_active = TRUE
+        """, (user_id,))
     return revoked_ids
 
 

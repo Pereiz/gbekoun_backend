@@ -1,0 +1,22 @@
+Session PC en cours (appelé depuis le TÉLÉPHONE de l'admin)
+Pour afficher « PC connecté : Chrome - Windows, jusqu'à 11:00 » avec un bouton « Déconnecter le PC ».
+---
+tags:
+  - Administration web
+responses:
+  200:
+    description: web_session vaut null si aucun PC n'est connecté
+    schema:
+      type: object
+      properties:
+        web_session:
+          type: object
+          properties:
+            device_id: {type: string}
+            device_name: {type: string, example: "Chrome - Windows"}
+            platform: {type: string, example: web}
+            kind: {type: string, example: web}
+            activated_at: {type: string}
+            session_expires_at: {type: string}
+  403:
+    description: MOBILE_REQUIRED (appelé depuis le PC)

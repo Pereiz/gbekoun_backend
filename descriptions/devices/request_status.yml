@@ -1,4 +1,4 @@
-État d'une demande (appelé par le NOUVEL appareil)
+État d'une demande (appelé par le demandeur : nouveau téléphone ou PC admin)
 Statuts : pending, approved (la réponse contient alors token/user_id/device_id), rejected, expired.
 Seul l'appareil qui a créé la demande peut la consulter (même device_secret).
 ---
@@ -30,6 +30,8 @@ responses:
         token: {type: string, description: "Présent seulement si approved"}
         user_id: {type: string}
         device_id: {type: string}
+        kind: {type: string, enum: [mobile, web]}
+        session_expires_at: {type: string, description: "PC uniquement"}
         display_name: {type: string}
         username: {type: string}
   404:

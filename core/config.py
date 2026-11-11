@@ -30,6 +30,11 @@ class Config:
     MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/gbekoundb_messages')
     MONGO_DB = os.getenv('MONGO_DB', 'gbekoundb_messages')
 
+    # Sites web autorisés à appeler l'API depuis un navigateur (interface admin).
+    # L'application mobile n'est pas concernée par CORS.
+    # Ex. : CORS_ORIGINS=https://admin.gbekoun.example,https://staging-admin.gbekoun.example
+    CORS_ORIGINS = [o.strip() for o in os.getenv('CORS_ORIGINS', '').split(',') if o.strip()]
+
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024
     BACKUP_DIR = os.getenv('BACKUP_DIR', 'backups')
     PORT = int(os.getenv('PORT', '8880'))
@@ -65,3 +70,21 @@ def validate_config():
         if name in _DEV_FALLBACKS:
             setattr(Config, name, _DEV_FALLBACKS[name])
             logger.warning('%s absent : valeur de développement utilisée (FLASK_DEBUG=1).', name)
+
+
+# Serveurs de développement courants (interface admin en local, Expo web).
+_DEV_CORS_ORIGINS = [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:8081',
+]
+
+
+def cors_origins():
+    """Origines autorisées. En production, uniquement celles de CORS_ORIGINS."""
+    if Config.CORS_ORIGINS:
+        return Config.CORS_ORIGINS
+    if Config.DEBUG:
+        return _DEV_CORS_ORIGINS
+    logger.warning('CORS_ORIGINS vide : aucun site web ne pourra appeler l\'API (le mobile fonctionne).')
+    return []

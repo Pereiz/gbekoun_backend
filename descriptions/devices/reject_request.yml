@@ -1,4 +1,4 @@
-Refuser le nouvel appareil (appelé par l'appareil ACTIF)
+Refuser le nouvel appareil (appelé par le TÉLÉPHONE actif, jamais par un PC)
 Rien ne change pour l'appareil actif ; le nouvel appareil verra status = rejected.
 ---
 tags:
@@ -16,6 +16,8 @@ responses:
       properties:
         request_id: {type: string}
         status: {type: string, example: rejected}
+  403:
+    description: MOBILE_REQUIRED (appelé depuis un PC)
   404:
     description: REQUEST_NOT_FOUND
   409:

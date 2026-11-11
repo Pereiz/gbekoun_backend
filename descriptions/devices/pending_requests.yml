@@ -1,4 +1,4 @@
-Demandes de connexion en attente (appelé par l'appareil ACTIF)
+Demandes de connexion en attente (appelé par le TÉLÉPHONE actif)
 À appeler à l'ouverture de l'appli, au cas où l'événement socket / la notification a été manqué.
 ---
 tags:
@@ -12,6 +12,7 @@ responses:
         type: object
         properties:
           request_id: {type: string}
+          kind: {type: string, enum: [mobile, web], description: "mobile = nouveau téléphone (ce téléphone sera déconnecté) ; web = accès administration depuis un PC (1 h)"}
           device_name: {type: string, example: "iPhone 13"}
           platform: {type: string, example: ios}
           requested_at: {type: string}

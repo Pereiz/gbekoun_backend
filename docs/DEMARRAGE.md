@@ -192,6 +192,25 @@ curl -X POST http://localhost:8880/api/auth/register \
           "device_secret": "<secret de son appareil>", "device_name": "Tecno Spark", "platform": "android"}'
 ```
 
+**L'admin sur son PC** (administration uniquement, session de 1 h) : le PC
+demande l'accès, le téléphone de l'admin valide. Pas de code nécessaire.
+
+```bash
+PC_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+# 1. Le PC demande l'accès → le téléphone de l'admin reçoit une notification
+curl -X POST http://localhost:8880/api/auth/device/web/requests \
+     -H "Content-Type: application/json" \
+     -d "{\"phone_number\": \"+22990000000\", \"device_secret\": \"$PC_SECRET\", \"device_name\": \"Chrome - Windows\"}"
+# → {"request_id": "...", "status": "pending"}
+# 2. L'admin accepte sur son téléphone (ou : POST /api/auth/device/requests/<id>/approve avec le token du téléphone)
+# 3. Le PC récupère son token (valable 1 h)
+curl -X POST http://localhost:8880/api/auth/device/requests/<request_id>/status \
+     -H "Content-Type: application/json" -d "{\"device_secret\": \"$PC_SECRET\"}"
+```
+
+Téléphone de l'admin indisponible : un code (`create_admin` ou un autre admin)
+s'utilise avec `POST /api/auth/device/web/activate`.
+
 **Un utilisateur a perdu son téléphone** : retrouver son `user_id` (`GET /api/admin/users?search=+229...`),
 puis `POST /api/admin/users/<user_id>/activation-code` et lui transmettre le
 code **en personne ou en le rappelant soi-même**. Téléphone volé : d'abord
@@ -275,6 +294,7 @@ gunicorn --worker-class gthread --workers 1 --threads 100 --bind 0.0.0.0:$PORT a
 | `MONGO_URI` | ✅ | URI MongoDB Atlas (`mongodb+srv://...`) |
 | `MONGO_DB` | | `gbekoundb_messages` (défaut) |
 | `EXPO_ACCESS_TOKEN` | | si l'accès sécurisé aux push Expo est activé |
+| `CORS_ORIGINS` | | domaine(s) de l'interface admin web, séparés par des virgules, ex. `https://admin.gbekoun.example`. Vide = aucun site web autorisé (l'appli mobile fonctionne quand même). |
 | `FLASK_DEBUG` | | ne pas définir (ou `0`) en production |
 
 **Mettre à jour le schéma de la base de production** (ajoute ce qui manque,
@@ -302,6 +322,8 @@ de la base managée, et celles d'Atlas pour MongoDB.
 | `Authentication failed` côté MongoDB | `MONGO_URI` ne correspond pas à `MONGO_ROOT_USER` / `MONGO_ROOT_PASSWORD`, ou le volume Mongo a été créé avec d'autres identifiants (`docker compose down -v`). |
 | `401 Compte introuvable ou supprimé` avec un token valide | Le compte a été supprimé, ou le token vient d'une autre base. |
 | `401 DEVICE_REVOKED` | Un autre appareil a été activé sur ce compte (ou l'admin a révoqué celui-ci). Réactiver l'appareil. |
+| `403 WEB_ADMIN_ONLY` | Appel d'une route hors administration depuis un PC (normal), ou compte non admin qui tente d'ouvrir une session PC. |
+| L'interface admin web est bloquée par le navigateur (erreur CORS) | Son domaine n'est pas dans `CORS_ORIGINS`. |
 | `403 DEVICE_NOT_RECOGNIZED` au login | Ce `device_secret` n'est pas celui de l'appareil du compte : passer par la validation de l'ancien appareil ou un code admin. |
 | Base existante créée avant le 11/11/2026 | Appliquer `database/migrations/002_user_devices.sql` (ou rejouer `schema.sql`). |
 | Socket connecté mais aucun message reçu | Vérifier que le token est passé dans `query: { token }` et que l'utilisateur est membre actif de la conversation. |

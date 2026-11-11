@@ -11,7 +11,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from flasgger import Swagger
 
-from core.config import Config, validate_config
+from core.config import Config, cors_origins, validate_config
 from core.extensions import socketio
 from core.http import ApiError
 
@@ -24,8 +24,9 @@ validate_config()
 app = Flask(__name__)
 app.config['SECRET_KEY'] = Config.SECRET_KEY
 app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
-CORS(app, resources={r"/*": {"origins": "*"}})
-socketio.init_app(app, cors_allowed_origins="*", async_mode='threading')
+# Avant : "*" (n'importe quel site pouvait appeler l'API depuis un navigateur).
+CORS(app, resources={r"/*": {"origins": cors_origins()}})
+socketio.init_app(app, cors_allowed_origins=cors_origins(), async_mode='threading')
 
 # Enregistre les événements Socket.IO (un seul endroit : sockets/events.py).
 import sockets.events  # noqa: E402,F401

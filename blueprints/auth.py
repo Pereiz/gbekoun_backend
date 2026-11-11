@@ -87,11 +87,14 @@ def login():
                d.id AS device_id,
                EXISTS (
                    SELECT 1 FROM gbekoun.user_devices a
-                   WHERE a.user_id = u.id AND a.revoked_at IS NULL
+                   WHERE a.user_id = u.id AND a.kind = 'mobile' AND a.revoked_at IS NULL
                ) AS has_active_device
         FROM gbekoun.users u
+        -- Seul le téléphone se connecte avec son secret. Le PC d'un admin doit
+        -- être validé par le téléphone à chaque session (/api/auth/device/web/requests).
         LEFT JOIN gbekoun.user_devices d
-               ON d.user_id = u.id AND d.revoked_at IS NULL AND d.secret_hash = %s
+               ON d.user_id = u.id AND d.kind = 'mobile' AND d.revoked_at IS NULL
+              AND d.secret_hash = %s
         WHERE u.phone_number = %s AND u.deleted_at IS NULL
     """, (device['secret_hash'], phone_number), fetch_one=True)
 

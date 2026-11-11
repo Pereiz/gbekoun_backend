@@ -14,6 +14,7 @@ from core.http import error_response
 from core.realtime import disconnect_user
 from core.security import require_admin, require_auth
 from services.devices import (
+    KIND_WEB,
     create_activation_code,
     disconnect_devices,
     format_activation_code,
@@ -720,10 +721,12 @@ def demote_from_admin(user_id):
     if user_id == g.current_user_id:
         return jsonify({'error': 'Vous ne pouvez pas vous rétrograder vous-même'}), 400
     
-    execute_query(sql.SQL("""
-        UPDATE gbekoun.users SET is_admin = FALSE WHERE id = %s
-    """), (user_id,))
-    
+    with transaction() as cur:
+        lock_user_devices(cur, user_id)
+        cur.execute("UPDATE gbekoun.users SET is_admin = FALSE WHERE id = %s", (user_id,))
+        # Plus admin = plus d'accès PC (le contrôle de session le refuserait de toute façon).
+        revoke_active_device(cur, user_id, 'admin_demoted', kind=KIND_WEB)
+
     return jsonify({
         'message': 'Administrateur rétrogradé',
         'user_id': user_id

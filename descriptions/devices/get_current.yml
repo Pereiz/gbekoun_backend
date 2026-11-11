@@ -11,6 +11,8 @@ responses:
         device_id: {type: string}
         device_name: {type: string, example: "Samsung Galaxy A15"}
         platform: {type: string, example: android}
+        kind: {type: string, enum: [mobile, web]}
+        session_expires_at: {type: string, description: "PC uniquement (null pour un téléphone)"}
         activated_at: {type: string, example: "2026-11-11T09:12:00.000Z"}
         last_seen_at: {type: string, example: "2026-11-11T10:30:00.000Z"}
   401:

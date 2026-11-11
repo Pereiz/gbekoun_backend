@@ -317,6 +317,10 @@ sockets sont fermés, ses jetons de notification push sont désactivés.
 | POST | `/api/admin/users/<id>/activation-code` | admin |
 | GET | `/api/admin/users/<id>/devices` | admin |
 | POST | `/api/admin/users/<id>/devices/revoke` | admin |
+| POST | `/api/auth/device/web/requests` | PC d'un admin (demande d'accès, 1 h) |
+| POST | `/api/auth/device/web/activate` | PC d'un admin (code de secours) |
+| GET | `/api/auth/device/web` | téléphone de l'admin (PC connecté ?) |
+| POST | `/api/auth/device/web/revoke` | téléphone ou PC (fermer la session PC) |
 
 Nouvel événement Socket.IO : `device_approval_requested` (vers l'appareil actif).
 Toutes les erreurs d'authentification portent désormais un `code`
@@ -336,6 +340,59 @@ Logs serveur : aucune erreur.
 > exigent `device_secret`, et les anciens tokens (sans appareil) sont refusés.
 > L'application doit être mise à jour en même temps que le backend
 > (sans impact sur des utilisateurs : rien n'est encore déployé).
+
+### Accès administration depuis un PC (11/11/2026)
+
+**Besoin.** L'admin doit pouvoir administrer depuis son PC, sans que cela
+déconnecte son téléphone, et le PC ne doit servir **qu'à l'administration**.
+
+**Règles.**
+
+| Règle | Détail |
+|-------|--------|
+| Réservé aux admins | Un utilisateur normal ne peut pas ouvrir de session PC (`403 WEB_ADMIN_ONLY`), même avec un code. |
+| Un seul PC par admin | Un nouveau PC remplace l'ancien (déconnecté immédiatement). |
+| Le téléphone n'est pas touché | Activer le PC ne révoque que l'ancien PC ; changer de téléphone ne coupe pas le PC. |
+| Pas de code à la 1re connexion | Le **téléphone de l'admin valide** chaque connexion du PC (notification « Autoriser l'accès administration sur Chrome - Windows (1 h) ? »). Code admin seulement en secours (`/web/activate`). |
+| Session de **1 h** | Limite appliquée **par le serveur** (colonne `expires_at`), pas seulement par le token : passé 1 h, `401 DEVICE_REVOKED` et il faut une nouvelle validation depuis le téléphone. `/login` ne fonctionne jamais pour un PC. |
+| Administration uniquement | Depuis un PC, seules `/api/admin/...`, `/api/auth/invite-codes...`, `GET /api/users/me`, `GET /api/auth/verify`, `GET /api/auth/device`, `POST /api/auth/logout` et `POST /api/auth/device/web/revoke` répondent. Tout le reste : `403 WEB_ADMIN_ONLY`. Socket.IO (chat) refusé. |
+| Validation = téléphone seulement | Un PC ne peut pas approuver de demande (`403`) : impossible d'enchaîner des sessions PC sans le téléphone. |
+| Contrôle à distance | Depuis le téléphone : `GET /api/auth/device/web` (PC connecté ?) et `POST /api/auth/device/web/revoke` (« Déconnecter le PC »). |
+| Perte des droits | Admin rétrogradé → session PC révoquée immédiatement (et refusée par le contrôle de session dans tous les cas). |
+
+**CORS.** Avant, n'importe quel site pouvait appeler l'API depuis un
+navigateur (`*`). Désormais, seuls les sites listés dans `CORS_ORIGINS` sont
+autorisés (exemple : `https://admin.gbekoun.example`, à remplacer par le vrai
+domaine). En développement, sans valeur : `localhost:3000`, `5173`, `8081`.
+L'application mobile n'est pas concernée (CORS ne s'applique qu'aux navigateurs).
+
+**Recommandations pour l'interface web admin** (à développer) :
+- générer un `device_secret` par session de navigateur et le garder en
+  `sessionStorage` ou en mémoire, **pas** en `localStorage` ;
+- garder le token en mémoire ; à `401 DEVICE_REVOKED`, renvoyer vers l'écran
+  « Validez sur votre téléphone » ;
+- afficher le compte à rebours de `session_expires_at`.
+
+**Note.** La limite de 5 demandes par heure est commune au téléphone et au
+PC. Un inconnu qui connaît le numéro de l'admin pourrait épuiser ce quota et
+retarder sa connexion PC d'une heure (sans jamais obtenir d'accès). Le code
+de secours (`/web/activate`) n'est pas concerné par ce quota.
+
+**Fichiers modifiés** : `services/devices.py` (types `mobile`/`web`, session 1 h),
+`core/security.py` (restriction des routes, expiration serveur, admin requis),
+`blueprints/devices.py` (routes `/web/...`, validation réservée au téléphone),
+`blueprints/auth.py` (`/login` réservé au téléphone), `blueprints/admin.py`
+(rétrogradation), `sockets/events.py` (PC refusé), `core/config.py` + `app.py`
+(CORS), `core/notifications.py`, schéma + migration 002 (colonnes `kind`,
+`expires_at`, index unique par type).
+
+**Tests.** 18 tests unitaires (dont 2 nouveaux) + scénario réel sur
+conteneurs jetables : **44/44 vérifications réussies** (validation du PC par
+le téléphone sans code, téléphone toujours connecté, session et token de 1 h,
+routes d'admin OK et le reste refusé, chat refusé, un PC ne peut pas valider,
+un nouveau PC remplace l'ancien, déconnexion du PC depuis le téléphone ou
+depuis le PC, expiration côté serveur, utilisateur normal refusé, code de
+secours, admin rétrogradé, changement de téléphone sans couper le PC, CORS).
 
 ---
 

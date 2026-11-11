@@ -1,7 +1,8 @@
-Autoriser le nouvel appareil (appelé par l'appareil ACTIF)
-Le nouvel appareil devient l'appareil du compte. L'appareil qui approuve est révoqué :
+Autoriser le nouvel appareil (appelé par le TÉLÉPHONE actif, jamais par un PC)
+kind = mobile : le nouveau téléphone devient l'appareil du compte et le téléphone qui approuve est révoqué :
 son token ne fonctionne plus et ses sockets sont fermés juste après la réponse.
 L'appli doit alors afficher « Compte transféré sur un autre appareil ».
+kind = web : le PC obtient une session d'administration de 1 h ; le téléphone reste connecté.
 ---
 tags:
   - Appareils
@@ -18,6 +19,8 @@ responses:
       properties:
         request_id: {type: string}
         status: {type: string, example: approved}
+  403:
+    description: MOBILE_REQUIRED (appelé depuis un PC)
   404:
     description: REQUEST_NOT_FOUND
   409:

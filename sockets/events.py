@@ -12,7 +12,7 @@ from flask_socketio import emit, join_room, rooms
 from core.database import execute_query, messages_col
 from core.extensions import socketio
 from core.realtime import conversation_room, device_room, user_room
-from core.security import SESSION_ACTIVE, decode_token, get_session_state, verify_token
+from core.security import KIND_MOBILE, SESSION_ACTIVE, decode_token, get_session_state, verify_token
 from services.messaging import MessageError, create_message, is_participant
 from utils.message_helpers import (
     parse_object_id,
@@ -89,8 +89,10 @@ def handle_connect():
         return False
     user_id = claims['user_id']
 
-    # Compte suspendu/supprimé, ou appareil remplacé par un autre : connexion refusée.
-    if get_session_state(user_id, claims['device_id']) != SESSION_ACTIVE:
+    # Compte suspendu/supprimé, appareil remplacé, ou session PC (le chat est
+    # réservé au téléphone, le PC d'un admin n'a accès qu'à l'administration).
+    state, kind = get_session_state(user_id, claims['device_id'])
+    if state != SESSION_ACTIVE or kind != KIND_MOBILE:
         return False
 
     with _connections_lock:

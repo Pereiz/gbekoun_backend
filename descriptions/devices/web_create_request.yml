@@ -1,0 +1,46 @@
+Connexion du PC d'un administrateur : demander l'accord de son téléphone
+À faire à CHAQUE session (elle dure 1 h). Le téléphone de l'admin reçoit
+`device_approval_requested` avec kind = "web" et une notification push.
+Ensuite interroger POST /api/auth/device/requests/{request_id}/status toutes les 2-3 s :
+la réponse "approved" contient le token (valable 1 h) et session_expires_at.
+Le téléphone n'est PAS déconnecté ; seul l'ancien PC éventuel est remplacé.
+---
+tags:
+  - Administration web
+security: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required: [phone_number, device_secret]
+      properties:
+        phone_number:
+          type: string
+          example: "+22990000000"
+        device_secret:
+          type: string
+          description: "Clé aléatoire générée par l'interface web pour CE navigateur (32 à 256 caractères). La garder en mémoire de session (sessionStorage), pas en localStorage."
+          example: "4b1e9c0d7a2f5e8b3c6d9a0f1e4b7c2d5a8f0e3b6c9d2a5f8e1b4c7d0a3f6e9b"
+        device_name:
+          type: string
+          description: Nom affiché sur le téléphone de l'admin
+          example: "Chrome - Windows"
+responses:
+  201:
+    description: Demande créée
+    schema:
+      type: object
+      properties:
+        request_id: {type: string}
+        status: {type: string, example: pending}
+        expires_at: {type: string}
+  403:
+    description: WEB_ADMIN_ONLY (le compte n'est pas administrateur) ou ACCOUNT_SUSPENDED
+  404:
+    description: USER_NOT_FOUND
+  409:
+    description: NO_ACTIVE_DEVICE (aucun téléphone pour valider → /web/activate avec un code) ou DEVICE_ALREADY_ACTIVE (session encore valide)
+  429:
+    description: TOO_MANY_REQUESTS (5 demandes par heure, tous appareils confondus)

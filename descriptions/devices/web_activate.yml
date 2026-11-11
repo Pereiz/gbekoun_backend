@@ -1,0 +1,47 @@
+Connexion du PC d'un administrateur avec un code (secours)
+Si le téléphone de l'admin est indisponible : code généré par un autre admin
+(POST /api/admin/users/{id}/activation-code) ou par scripts/create_admin.py.
+Ouvre une session PC de 1 h, sans toucher au téléphone.
+---
+tags:
+  - Administration web
+security: []
+parameters:
+  - name: body
+    in: body
+    required: true
+    schema:
+      type: object
+      required: [phone_number, activation_code, device_secret]
+      properties:
+        phone_number:
+          type: string
+          example: "+22990000000"
+        activation_code:
+          type: string
+          example: "K7MP-2XQR"
+        device_secret:
+          type: string
+          description: "Clé aléatoire générée par l'interface web pour CE navigateur (32 à 256 caractères). La garder en mémoire de session (sessionStorage), pas en localStorage."
+          example: "4b1e9c0d7a2f5e8b3c6d9a0f1e4b7c2d5a8f0e3b6c9d2a5f8e1b4c7d0a3f6e9b"
+        device_name:
+          type: string
+          description: Nom affiché sur le téléphone de l'admin
+          example: "Chrome - Windows"
+responses:
+  200:
+    description: Session PC ouverte
+    schema:
+      type: object
+      properties:
+        token: {type: string, description: "Valable 1 h"}
+        user_id: {type: string}
+        device_id: {type: string}
+        kind: {type: string, example: web}
+        session_expires_at: {type: string, example: "2026-11-11T11:00:00.000Z"}
+        display_name: {type: string}
+        username: {type: string}
+  403:
+    description: INVALID_ACTIVATION_CODE (avec attempts_left), WEB_ADMIN_ONLY, ACCOUNT_SUSPENDED
+  404:
+    description: USER_NOT_FOUND

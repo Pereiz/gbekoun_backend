@@ -1,0 +1,13 @@
+Fermer la session PC
+Depuis le téléphone (« Déconnecter le PC ») ou depuis le PC lui-même (bouton « Se déconnecter »).
+Le token du PC est refusé immédiatement (401 DEVICE_REVOKED).
+---
+tags:
+  - Administration web
+responses:
+  200:
+    description: Session fermée
+    schema:
+      type: object
+      properties:
+        revoked: {type: integer, example: 1, description: "0 si aucun PC n'était connecté"}

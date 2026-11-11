@@ -181,7 +181,8 @@ CREATE TABLE IF NOT EXISTS gbekoun.push_devices (
 );
 
 -- -------------------------------------------------------------
--- Appareils : un seul appareil actif par compte
+-- Appareils : un seul appareil mobile actif par compte
+-- (+ pour les admins seulement : une session web d'administration, 1 h max)
 -- (équivalent de database/migrations/002_user_devices.sql)
 -- -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS gbekoun.user_devices (
@@ -189,15 +190,19 @@ CREATE TABLE IF NOT EXISTS gbekoun.user_devices (
     user_id         UUID        NOT NULL REFERENCES gbekoun.users(id) ON DELETE CASCADE,
     secret_hash     CHAR(64)    NOT NULL,       -- SHA-256 du device_secret (jamais le secret)
     device_name     VARCHAR(100),
-    platform        VARCHAR(20) CHECK (platform IN ('android', 'ios')),
+    kind            VARCHAR(10) NOT NULL DEFAULT 'mobile'
+        CHECK (kind IN ('mobile', 'web')),      -- web = PC, administration uniquement
+    platform        VARCHAR(20) CHECK (platform IN ('android', 'ios', 'web')),
     created_at      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at    TIMESTAMP,
+    expires_at      TIMESTAMP   NULL,           -- fin de session (web) ; NULL = pas de limite
     revoked_at      TIMESTAMP   NULL,           -- NULL = appareil actif
     revoked_reason  VARCHAR(50)
 );
--- La base garantit elle-même la règle « un seul appareil actif par compte ».
-CREATE UNIQUE INDEX IF NOT EXISTS uq_user_devices_one_active
-    ON gbekoun.user_devices(user_id) WHERE revoked_at IS NULL;
+-- La base garantit elle-même « un seul appareil actif par compte et par type »
+-- (un téléphone, et pour un admin un seul PC).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_user_devices_one_active_per_kind
+    ON gbekoun.user_devices(user_id, kind) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_user_devices_secret_active
     ON gbekoun.user_devices(secret_hash) WHERE revoked_at IS NULL;
 
@@ -222,6 +227,7 @@ CREATE TABLE IF NOT EXISTS gbekoun.device_approval_requests (
     secret_hash         CHAR(64)    NOT NULL,
     device_name         VARCHAR(100),
     platform            VARCHAR(20),
+    kind                VARCHAR(10) NOT NULL DEFAULT 'mobile' CHECK (kind IN ('mobile', 'web')),
     status              VARCHAR(20) NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
     approved_device_id  UUID        REFERENCES gbekoun.user_devices(id) ON DELETE SET NULL,
