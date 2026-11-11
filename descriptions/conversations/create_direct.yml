@@ -10,9 +10,12 @@ parameters:
     required: true
     schema:
       type: object
-      required:
-        - phone_number
+      description: "Indiquer user_id OU phone_number"
       properties:
+        user_id:
+          type: string
+          description: Id de l'autre utilisateur (ex. issu de /api/users/search)
+          example: "550e8400-e29b-41d4-a716-446655440000"
         phone_number:
           type: string
           description: Numéro de téléphone de l'autre utilisateur
@@ -36,7 +39,7 @@ responses:
         id:
           type: string
   400:
-    description: Numéro requis
+    description: USER_REQUIRED (ni user_id ni phone_number), ou conversation avec soi-même
   404:
     description: Utilisateur non trouvé
   401:

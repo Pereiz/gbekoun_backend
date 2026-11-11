@@ -139,12 +139,10 @@ def stats_messages():
             'by_type': {item['_id']: item['count'] for item in messages_by_type if item['_id']},
             'daily': daily_stats
         }), 200
-    except Exception as e:
-        # Log l'erreur (avec import logging)
-        import logging
-        logging.error(f"Erreur dans stats_messages: {str(e)}")
-        # Renvoyer une réponse détaillée en développement, ou 500 avec message
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        # Le détail va dans les logs, jamais dans la réponse.
+        logger.exception("Erreur dans stats_messages")
+        return jsonify({'error': 'Erreur lors du calcul des statistiques'}), 500
 
 
 @admin_bp.route('/stats/conversations', methods=['GET'])

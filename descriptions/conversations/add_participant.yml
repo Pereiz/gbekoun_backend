@@ -15,9 +15,11 @@ parameters:
     required: true
     schema:
       type: object
-      required:
-        - phone_number
+      description: "Indiquer user_id OU phone_number"
       properties:
+        user_id:
+          type: string
+          description: Id du participant à ajouter
         phone_number:
           type: string
           description: Numéro de téléphone du participant à ajouter

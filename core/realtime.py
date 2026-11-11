@@ -32,6 +32,17 @@ def _user_sids(user_id):
     return _room_sids(user_room(user_id))
 
 
+def emit_to_conversation(event, payload, conversation_id, exclude_user_id=None):
+    """Diffuse un événement aux membres connectés d'une conversation (depuis le REST).
+
+    exclude_user_id : l'auteur de l'action n'a pas besoin de l'événement (il a
+    déjà la réponse HTTP) ; c'est le même comportement que `include_self=False`
+    côté Socket.IO, ce qui évite les doublons dans l'appli.
+    """
+    skip = _user_sids(exclude_user_id) if exclude_user_id else None
+    socketio.emit(event, payload, room=conversation_room(conversation_id), skip_sid=skip or None)
+
+
 def join_users_to_conversation(user_ids, conversation_id):
     """Ajoute les sockets connectés de ces utilisateurs à la room de la conversation."""
     room = conversation_room(conversation_id)

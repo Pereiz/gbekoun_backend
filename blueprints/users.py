@@ -1,12 +1,25 @@
 # blueprints/users.py
+import uuid
 from flask import Blueprint, request, jsonify, g
 from flasgger import swag_from
 from psycopg2 import sql
 from core.database import execute_query
+from core.http import error_response
 from core.realtime import disconnect_user
 from core.security import require_auth
+from services.users import (
+    are_contacts,
+    escape_like,
+    is_blocked_between,
+    mask_phone,
+    phone_candidates,
+)
 
 users_bp = Blueprint('users', __name__, url_prefix='/api/users')
+
+SEARCH_MAX_LIMIT = 50
+# Texte composé presque uniquement de chiffres (un numéro de téléphone, même avec espaces).
+PHONE_LIKE_REGEX = r'^\+?[0-9 ().-]{6,}$'
 
 
 @users_bp.route('/me/push-token', methods=['POST'])
@@ -170,34 +183,62 @@ def get_status():
 @require_auth
 @swag_from('../descriptions/users/search_users.yml')
 def search_users():
+    """Recherche d'utilisateurs.
+
+    - Numéro complet (ex. +22991000001) : correspondance exacte, numéro renvoyé
+      (celui qui cherche le connaît déjà).
+    - Sinon, recherche par nom / pseudo : le numéro n'est PAS renvoyé, seulement
+      une version masquée. Avant, chercher « 91 » listait les numéros de tout le monde.
     """
-    Recherche des utilisateurs
-    """
-    query = request.args.get('q', '')
-    limit = request.args.get('limit', 20, type=int)
-    
-    if not query or len(query) < 2:
-        return jsonify({'error': 'Terme de recherche trop court'}), 400
-    
-    # Récupérer la liste des utilisateurs bloqués
-    blocked = execute_query(sql.SQL("""
-        SELECT blocked_id FROM gbekoun.blocked_users WHERE blocker_id = %s
-    """), (g.current_user_id,), fetch_all=True)
-    blocked_ids = [str(b['blocked_id']) for b in blocked] if blocked else []
-    
-    # Recherche
-    users = execute_query(sql.SQL("""
+    query = (request.args.get('q') or '').strip()
+    limit = max(1, min(request.args.get('limit', 20, type=int) or 20, SEARCH_MAX_LIMIT))
+
+    if len(query) < 2:
+        return error_response('Terme de recherche trop court', 400, 'QUERY_TOO_SHORT')
+
+    phones = phone_candidates(query)
+    if phones:
+        users = execute_query("""
+            SELECT id, phone_number, display_name, username, avatar_url, is_online
+            FROM gbekoun.users u
+            WHERE phone_number = ANY(%s) AND id != %s AND deleted_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM gbekoun.blocked_users b
+                  WHERE (b.blocker_id = %s AND b.blocked_id = u.id)
+                     OR (b.blocker_id = u.id AND b.blocked_id = %s)
+              )
+        """, (phones, g.current_user_id, g.current_user_id, g.current_user_id), fetch_all=True)
+        for user in users:
+            user['phone_masked'] = mask_phone(user['phone_number'])
+        return jsonify(users), 200
+
+    pattern = f'%{escape_like(query)}%'
+    users = execute_query("""
         SELECT id, phone_number, display_name, username, avatar_url, is_online
-        FROM gbekoun.users
-        WHERE (phone_number ILIKE %s OR display_name ILIKE %s OR username ILIKE %s)
-        AND id != %s
-        AND deleted_at IS NULL
+        FROM gbekoun.users u
+        -- Un nom ou pseudo qui ressemble à un numéro (valeur par défaut à
+        -- l'inscription = le numéro) n'est pas cherchable : sinon « 9100 »
+        -- permettrait de reconstituer un numéro chiffre par chiffre.
+        WHERE ((display_name ILIKE %s AND display_name !~ %s)
+               OR (username ILIKE %s AND username !~ %s))
+          AND id != %s AND deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM gbekoun.blocked_users b
+              WHERE (b.blocker_id = %s AND b.blocked_id = u.id)
+                 OR (b.blocker_id = u.id AND b.blocked_id = %s)
+          )
+        ORDER BY display_name ASC
         LIMIT %s
-    """), (f'%{query}%', f'%{query}%', f'%{query}%', g.current_user_id, limit), fetch_all=True)
-    
-    # Filtrer les utilisateurs bloqués
-    users = [u for u in users if u['id'] not in blocked_ids] if blocked_ids else users
-    
+    """, (pattern, PHONE_LIKE_REGEX, pattern, PHONE_LIKE_REGEX,
+          g.current_user_id, g.current_user_id, g.current_user_id, limit), fetch_all=True)
+
+    for user in users:
+        user['phone_masked'] = mask_phone(user.pop('phone_number'))
+        # Ex. : un pseudo par défaut égal au numéro ne doit pas le révéler.
+        if phone_candidates(user.get('username') or ''):
+            user['username'] = None
+        if phone_candidates(user.get('display_name') or ''):
+            user['display_name'] = user['phone_masked']
     return jsonify(users), 200
 
 
@@ -205,48 +246,58 @@ def search_users():
 @require_auth
 @swag_from('../descriptions/users/get_user.yml')
 def get_user(user_id):
+    """Profil d'un utilisateur.
+
+    Le numéro n'est visible que par l'utilisateur lui-même et par les personnes
+    avec qui il partage une conversation (sinon : `phone_masked` seulement).
     """
-    Récupère un utilisateur par ID
-    """
-    # Vérifier si l'utilisateur est bloqué
-    is_blocked = execute_query(sql.SQL("""
-        SELECT 1 FROM gbekoun.blocked_users 
-        WHERE blocker_id = %s AND blocked_id = %s
-    """), (g.current_user_id, user_id), fetch_one=True)
-    
-    if is_blocked:
-        return jsonify({'error': 'Utilisateur non trouvé'}), 404
-    
-    user = execute_query(sql.SQL("""
-        SELECT id, phone_number, display_name, username, bio, avatar_url, 
-               is_online, last_seen, created_at, privacy_last_seen, 
+    try:
+        uuid.UUID(user_id)
+    except ValueError:
+        return error_response('Utilisateur non trouvé', 404, 'USER_NOT_FOUND')
+
+    if is_blocked_between(g.current_user_id, user_id):
+        return error_response('Utilisateur non trouvé', 404, 'USER_NOT_FOUND')
+
+    user = execute_query("""
+        SELECT id, phone_number, display_name, username, bio, avatar_url,
+               is_online, last_seen, created_at, privacy_last_seen,
                privacy_profile_photo, privacy_about
-        FROM gbekoun.users 
-        WHERE id = %s AND deleted_at IS NULL
-    """), (user_id,), fetch_one=True)
-    
+        FROM gbekoun.users
+        WHERE id::text = %s AND deleted_at IS NULL
+    """, (user_id,), fetch_one=True)
+
     if not user:
-        return jsonify({'error': 'Utilisateur non trouvé'}), 404
-    
-    # Appliquer les paramètres de confidentialité
-    if user['privacy_last_seen'] == 'nobody' and user['id'] != g.current_user_id:
-        user['last_seen'] = None
-    elif user['privacy_last_seen'] == 'contacts':
-        # Vérifier si les utilisateurs sont en contact (conversation directe)
-        are_contacts = execute_query(sql.SQL("""
-            SELECT 1 FROM gbekoun.conversation_participants cp1
-            JOIN gbekoun.conversation_participants cp2 ON cp2.conversation_id = cp1.conversation_id
-            JOIN gbekoun.conversations c ON c.id = cp1.conversation_id
-            WHERE c.type = 'direct' 
-            AND cp1.user_id = %s AND cp2.user_id = %s
-        """), (g.current_user_id, user_id), fetch_one=True)
-        
-        if not are_contacts:
+        return error_response('Utilisateur non trouvé', 404, 'USER_NOT_FOUND')
+
+    is_self = str(user['id']) == str(g.current_user_id)
+    is_contact = is_self or are_contacts(g.current_user_id, user['id'])
+
+    user['phone_masked'] = mask_phone(user['phone_number'])
+    if not is_contact:
+        user['phone_number'] = None
+        if phone_candidates(user.get('username') or ''):
+            user['username'] = None
+        if phone_candidates(user.get('display_name') or ''):
+            user['display_name'] = user['phone_masked']
+
+    # Paramètres de confidentialité
+    if not is_self:
+        if user['privacy_last_seen'] == 'nobody':
             user['last_seen'] = None
-    
-    if user['privacy_profile_photo'] == 'nobody' and user['id'] != g.current_user_id:
-        user['avatar_url'] = None
-    
+        elif user['privacy_last_seen'] == 'contacts' and not is_contact:
+            user['last_seen'] = None
+
+        if user['privacy_profile_photo'] == 'nobody' or (
+            user['privacy_profile_photo'] == 'contacts' and not is_contact
+        ):
+            user['avatar_url'] = None
+
+        if user['privacy_about'] == 'nobody' or (
+            user['privacy_about'] == 'contacts' and not is_contact
+        ):
+            user['bio'] = None
+
     return jsonify(user), 200
 
 
@@ -254,27 +305,20 @@ def get_user(user_id):
 @require_auth
 @swag_from('../descriptions/users/get_user_by_phone.yml')
 def get_user_by_phone(phone_number):
-    """
-    Récupère un utilisateur par numéro de téléphone
-    """
-    user = execute_query(sql.SQL("""
+    """Utilisateur correspondant exactement à un numéro complet."""
+    phones = phone_candidates(phone_number)
+    if not phones:
+        return error_response('Numéro complet requis (format international)', 400, 'INVALID_PHONE')
+
+    user = execute_query("""
         SELECT id, phone_number, display_name, username, avatar_url, is_online
-        FROM gbekoun.users 
-        WHERE phone_number = %s AND deleted_at IS NULL
-    """), (phone_number,), fetch_one=True)
-    
-    if not user:
-        return jsonify({'error': 'Utilisateur non trouvé'}), 404
-    
-    # Vérifier si l'utilisateur est bloqué
-    is_blocked = execute_query(sql.SQL("""
-        SELECT 1 FROM gbekoun.blocked_users 
-        WHERE blocker_id = %s AND blocked_id = %s
-    """), (g.current_user_id, user['id']), fetch_one=True)
-    
-    if is_blocked:
-        return jsonify({'error': 'Utilisateur non trouvé'}), 404
-    
+        FROM gbekoun.users
+        WHERE phone_number = ANY(%s) AND deleted_at IS NULL
+    """, (phones,), fetch_one=True)
+
+    if not user or is_blocked_between(g.current_user_id, user['id']):
+        return error_response('Utilisateur non trouvé', 404, 'USER_NOT_FOUND')
+
     return jsonify(user), 200
 
 

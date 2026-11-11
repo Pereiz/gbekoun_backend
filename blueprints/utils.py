@@ -1,14 +1,16 @@
 # blueprints/utils.py
 import os
 import re
-import platform
 from datetime import datetime
-from flask import Blueprint, request, jsonify
+import logging
+from flask import Blueprint, abort, request, jsonify
 from flasgger import swag_from
 from psycopg2 import sql
-from core.database import execute_query, mongo_client
+from core.config import Config
+from core.database import execute_query, mongo_health_client
 
 utils_bp = Blueprint('utils', __name__, url_prefix='/api')
+logger = logging.getLogger(__name__)
 
 
 # ===================== CONFIGURATION =====================
@@ -88,63 +90,34 @@ def get_config():
 @utils_bp.route('/health', methods=['GET'])
 @swag_from('../descriptions/utils/health.yml')
 def health_check():
+    """Santé du backend (public, utilisable par un moniteur).
+
+    Ne renvoie que up/down : plus de message d'erreur (qui pouvait révéler
+    l'hôte ou l'utilisateur de la base) ni d'informations disque.
+    Code 503 si une base est injoignable. Les détails restent dans les logs.
     """
-    Vérification santé du backend
-    """
-    status = {
-        'status': 'healthy',
+    services = {}
+
+    try:
+        result = execute_query("SELECT 1 AS connected", fetch_one=True)
+        services['postgresql'] = 'up' if result and result.get('connected') == 1 else 'down'
+    except Exception:
+        logger.exception('Health check PostgreSQL en échec')
+        services['postgresql'] = 'down'
+
+    try:
+        mongo_health_client().admin.command('ping')
+        services['mongodb'] = 'up'
+    except Exception:
+        logger.exception('Health check MongoDB en échec')
+        services['mongodb'] = 'down'
+
+    healthy = all(state == 'up' for state in services.values())
+    return jsonify({
+        'status': 'healthy' if healthy else 'degraded',
         'timestamp': datetime.utcnow().isoformat(),
-        'services': {}
-    }
-    
-    # Vérifier PostgreSQL
-    try:
-        result = execute_query(sql.SQL("""SELECT 1 as connected"""), fetch_one=True)
-        status['services']['postgresql'] = {
-            'status': 'up' if result and result.get('connected') == 1 else 'down',
-            'message': 'Connected'
-        }
-    except Exception as e:
-        status['services']['postgresql'] = {
-            'status': 'down',
-            'message': str(e)
-        }
-        status['status'] = 'degraded'
-    
-    # Vérifier MongoDB
-    try:
-        mongo_client.admin.command('ping')
-        status['services']['mongodb'] = {
-            'status': 'up',
-            'message': 'Connected'
-        }
-    except Exception as e:
-        status['services']['mongodb'] = {
-            'status': 'down',
-            'message': str(e)
-        }
-        status['status'] = 'degraded'
-    
-    # WebSocket : servi par le même process que l'API
-    status['services']['websocket'] = {
-        'status': 'up',
-        'message': 'SocketIO ready'
-    }
-    
-    # Vérifier l'espace disque (optionnel)
-    try:
-        import shutil
-        disk_usage = shutil.disk_usage('/')
-        free_gb = disk_usage.free / (1024**3)
-        status['disk'] = {
-            'free_gb': round(free_gb, 2),
-            'total_gb': round(disk_usage.total / (1024**3), 2),
-            'percent_used': round((1 - disk_usage.free / disk_usage.total) * 100, 2)
-        }
-    except:
-        pass
-    
-    return jsonify(status), 200
+        'services': services,
+    }), 200 if healthy else 503
 
 
 # ===================== VERSION =====================
@@ -158,10 +131,7 @@ def get_version():
     return jsonify({
         'version': '1.0.0',
         'api_version': 'v1',
-        'build_date': datetime.utcnow().isoformat(),
         'environment': os.getenv('FLASK_ENV', 'development'),
-        'python_version': platform.python_version(),
-        'flask_version': '3.0.0',
         'features': {
             'rest_api': True,
             'websocket': True,
@@ -374,13 +344,18 @@ def server_time():
 
 @utils_bp.route('/echo', methods=['POST'])
 def echo():
+    """Echo pour tester les requêtes — DÉVELOPPEMENT UNIQUEMENT.
+
+    Renvoyait tous les en-têtes reçus, dont `Authorization` : en production la
+    route répond 404.
     """
-    Echo endpoint pour tester les requêtes
-    """
-    data = request.get_json() if request.is_json else {}
+    if not Config.DEBUG:
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ('authorization', 'cookie')}
     return jsonify({
         'echo': data,
         'method': request.method,
-        'headers': dict(request.headers),
+        'headers': headers,
         'timestamp': datetime.utcnow().isoformat()
     }), 200

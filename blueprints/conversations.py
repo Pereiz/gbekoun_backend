@@ -5,8 +5,13 @@ import uuid
 from datetime import datetime, timedelta
 from psycopg2 import sql
 from core.database import execute_query, messages_col, transaction
-from core.realtime import join_users_to_conversation, remove_users_from_conversation
+from core.realtime import (
+    emit_to_conversation,
+    join_users_to_conversation,
+    remove_users_from_conversation,
+)
 from core.security import require_auth
+from services.users import resolve_user_id
 from utils.message_helpers import serialize_message_value
 
 conversations_bp = Blueprint('conversations', __name__)
@@ -71,23 +76,13 @@ def get_conversations():
 @require_auth
 @swag_from('../descriptions/conversations/create_direct.yml')
 def create_direct():
-    """Crée ou récupère une conversation directe 1-1"""
+    """Crée ou récupère une conversation directe 1-1.
+
+    L'autre personne est désignée par `user_id` (ex. résultat de recherche par
+    nom, qui ne renvoie plus les numéros) ou par `phone_number`.
+    """
     data = request.get_json(silent=True) or {}
-    phone_number = data.get('phone_number')
-
-    if not phone_number:
-        return jsonify({'error': 'Numéro de téléphone requis'}), 400
-
-    # Trouver l'autre utilisateur
-    other_user = execute_query(
-        sql.SQL("""SELECT id FROM gbekoun.users WHERE phone_number = %s AND deleted_at IS NULL"""),
-        (phone_number,), fetch_one=True
-    )
-
-    if not other_user:
-        return jsonify({'error': 'Utilisateur non trouvé'}), 404
-
-    other_user_id = str(other_user['id'])
+    other_user_id = resolve_user_id(data)
     if other_user_id == str(g.current_user_id):
         return jsonify({'error': 'Impossible de créer une conversation avec vous-même'}), 400
 
@@ -147,12 +142,14 @@ def create_group():
     data = request.get_json(silent=True) or {}
     name = data.get('name')
     participants_phones = data.get('participants', [])
+    # Membres désignés par numéro (`participants`) et/ou par id (`participant_ids`).
+    participant_user_ids = data.get('participant_ids', [])
     avatar_url = data.get('avatar_url')
 
     if not name:
         return jsonify({'error': 'Nom du groupe requis'}), 400
-    if not isinstance(participants_phones, list):
-        return jsonify({'error': 'participants doit être une liste de numéros'}), 400
+    if not isinstance(participants_phones, list) or not isinstance(participant_user_ids, list):
+        return jsonify({'error': 'participants et participant_ids doivent être des listes'}), 400
 
     conversation_id = str(uuid.uuid4())
 
@@ -161,8 +158,8 @@ def create_group():
     with transaction() as cur:
         cur.execute("""
             SELECT id FROM gbekoun.users
-            WHERE phone_number = ANY(%s) AND deleted_at IS NULL
-        """, (list(participants_phones),))
+            WHERE (phone_number = ANY(%s) OR id::text = ANY(%s)) AND deleted_at IS NULL
+        """, ([str(p) for p in participants_phones], [str(i) for i in participant_user_ids]))
         # Le créateur en premier, puis les autres sans doublon (même numéro répété, ou soi-même).
         participant_ids = list(dict.fromkeys(
             [str(g.current_user_id)] + [str(row['id']) for row in cur.fetchall()]
@@ -433,12 +430,10 @@ def get_participants(conversation_id):
 @require_auth
 @swag_from('../descriptions/conversations/add_participant.yml')
 def add_participant(conversation_id):
-    """Ajoute un participant au groupe"""
+    """Ajoute un participant au groupe (désigné par `user_id` ou `phone_number`)"""
     data = request.get_json(silent=True) or {}
-    phone_number = data.get('phone_number')
-    
-    if not phone_number:
-        return jsonify({'error': 'Numéro de téléphone requis'}), 400
+    if not data.get('user_id') and not data.get('phone_number'):
+        return jsonify({'error': 'user_id ou phone_number requis', 'code': 'USER_REQUIRED'}), 400
     
     # Vérifier que l'utilisateur courant est admin du groupe
     admin_check = execute_query("""
@@ -462,13 +457,7 @@ def add_participant(conversation_id):
         return jsonify({'error': 'Seuls les groupes peuvent avoir plusieurs participants'}), 400
     
     # Trouver l'utilisateur à ajouter
-    user_to_add = execute_query(
-        sql.SQL("""SELECT id FROM gbekoun.users WHERE phone_number = %s"""),
-        (phone_number,), fetch_one=True
-    )
-    
-    if not user_to_add:
-        return jsonify({'error': 'Utilisateur non trouvé'}), 404
+    user_to_add = {'id': resolve_user_id(data)}
     
     # Ajouter le participant (ou le réintégrer s'il était parti)
     execute_query("""
@@ -655,12 +644,21 @@ def mark_read(conversation_id):
     message_id = data.get('message_id')
     
     # Mettre à jour le compteur de messages non lus
-    execute_query(sql.SQL("""
+    updated = execute_query(sql.SQL("""
         UPDATE gbekoun.conversation_participants
         SET unread_count = 0, last_read_message_id = %s
-        WHERE conversation_id = %s AND user_id = %s
-    """), (message_id, conversation_id, g.current_user_id))
-    
+        WHERE conversation_id = %s AND user_id = %s AND deleted_at IS NULL
+        RETURNING 1
+    """), (message_id, conversation_id, g.current_user_id), fetch_one=True)
+    if not updated:
+        return jsonify({'error': 'Conversation non trouvée'}), 404
+
+    # Accusé de lecture en temps réel (comme l'événement socket mark_read).
+    emit_to_conversation('message_read', {
+        'conversation_id': conversation_id,
+        'user_id': g.current_user_id,
+        'message_id': message_id,
+    }, conversation_id, exclude_user_id=g.current_user_id)
     return jsonify({'message': 'Messages marqués comme lus'}), 200
 
 

@@ -7,7 +7,7 @@ from flasgger import swag_from
 
 from core.database import execute_query, messages_col
 from core.extensions import socketio
-from core.realtime import conversation_room, user_room
+from core.realtime import conversation_room, emit_to_conversation, user_room
 from core.security import require_auth
 from services.messaging import (
     MessageError,
@@ -130,6 +130,12 @@ def send_message_rest(conversation_id):
     except MessageError as error:
         return jsonify({'error': error.message}), error.http_status
 
+    # Diffusion temps réel aux autres participants (comme l'envoi par socket).
+    # Avant, un message envoyé par REST n'arrivait chez les autres qu'au
+    # prochain rechargement de la conversation.
+    emit_to_conversation('new_message', serialize_message_value(message), conversation_id,
+                         exclude_user_id=g.current_user_id)
+
     reply_to_id = message.get('reply_to_id')
     return jsonify({
         'message_id': str(message['_id']),
@@ -165,11 +171,17 @@ def edit_message(conversation_id, message_id):
     if message['sender_id'] != g.current_user_id:
         return jsonify({'error': 'Vous ne pouvez modifier que vos propres messages'}), 403
 
+    edited_at = datetime.now(timezone.utc)
     result = messages_col.update_one(
         {'_id': object_id},
-        {'$set': {'content': new_content, 'edited_at': datetime.now(timezone.utc)}}
+        {'$set': {'content': new_content, 'edited_at': edited_at}}
     )
     if result.matched_count > 0:
+        emit_to_conversation('message_edited', {
+            'message_id': message_id,
+            'new_content': new_content,
+            'edited_at': to_utc_isoformat(edited_at),
+        }, conversation_id)
         return jsonify({'message': 'Message modifié'}), 200
 
     return jsonify({'error': 'Erreur lors de la modification'}), 500
@@ -257,6 +269,11 @@ def add_reaction(conversation_id, message_id):
         return jsonify({'error': 'Message non trouvé'}), 404
 
     set_user_reaction(messages_col, object_id, g.current_user_id, reaction)
+    emit_to_conversation('reaction_added', {
+        'message_id': message_id,
+        'user_id': g.current_user_id,
+        'reaction': reaction,
+    }, conversation_id)
     return jsonify({'message': 'Réaction ajoutée'}), 200
 
 
@@ -272,10 +289,15 @@ def remove_reaction(conversation_id, message_id):
     if not object_id:
         return _invalid_message_id()
 
-    messages_col.update_one(
+    result = messages_col.update_one(
         {'_id': object_id, 'conversation_id': conversation_id},
         {'$pull': {'reactions': {'user_id': g.current_user_id}}}
     )
+    if result.matched_count:
+        emit_to_conversation('reaction_removed', {
+            'message_id': message_id,
+            'user_id': g.current_user_id,
+        }, conversation_id)
     return jsonify({'message': 'Réaction supprimée'}), 200
 
 
@@ -333,8 +355,8 @@ def forward_message(conversation_id, message_id):
         new_message['_id'] = result.inserted_id
         after_message_created(target_conv_id, g.current_user_id, str(result.inserted_id))
 
-        socketio.emit('new_message', serialize_message_value(new_message),
-                      room=conversation_room(target_conv_id))
+        emit_to_conversation('new_message', serialize_message_value(new_message), target_conv_id,
+                             exclude_user_id=g.current_user_id)
         forwarded_messages.append({
             'conversation_id': target_conv_id,
             'message_id': str(result.inserted_id)

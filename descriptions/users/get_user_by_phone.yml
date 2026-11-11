@@ -1,4 +1,5 @@
-Récupère un utilisateur par numéro de téléphone
+Récupère un utilisateur par numéro de téléphone complet
+Correspondance exacte uniquement (avec ou sans « + »).
 ---
 tags:
   - Utilisateurs
@@ -9,8 +10,11 @@ parameters:
     in: path
     type: string
     required: true
+    example: "+22991000001"
 responses:
   200:
     description: Détails de l'utilisateur
+  400:
+    description: INVALID_PHONE (pas un numéro complet)
   404:
-    description: Utilisateur non trouvé
+    description: USER_NOT_FOUND

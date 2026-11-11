@@ -1,19 +1,23 @@
-Vérification santé du backend
+Vérification santé du backend (public)
+Ne renvoie que l'état up/down de chaque base, sans détail d'erreur ni information
+système. Code 503 si une base est injoignable (utilisable par un moniteur).
+Pour un simple « le serveur répond », utiliser GET /health.
 ---
 tags:
   - Utilitaires
+security: []
 responses:
   200:
-    description: État du serveur
+    description: Tout fonctionne
     schema:
       type: object
       properties:
-        status:
-          type: string
-          enum: [healthy, degraded, down]
-        timestamp:
-          type: string
+        status: {type: string, example: healthy}
+        timestamp: {type: string}
         services:
           type: object
-        disk:
-          type: object
+          properties:
+            postgresql: {type: string, enum: [up, down]}
+            mongodb: {type: string, enum: [up, down]}
+  503:
+    description: Une base est injoignable (status = degraded)

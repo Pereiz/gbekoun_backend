@@ -438,6 +438,109 @@ quota ; téléphone jamais soumis à l'inactivité).
 
 ---
 
+## Suite des corrections (11/11/2026)
+
+### R1. La recherche d'utilisateurs exposait les numéros de tout le monde
+
+**Problème.** `GET /api/users/search?q=91` cherchait aussi dans les numéros
+(`ILIKE '%91%'`) et renvoyait le numéro complet de chaque résultat : en
+quelques requêtes, on pouvait lister tous les comptes et leurs numéros.
+`GET /api/users/<id>` renvoyait aussi le numéro de n'importe qui.
+
+**Correction.**
+
+| Recherche | Résultat |
+|-----------|----------|
+| Par nom ou pseudo (« Kof ») | Profils **sans** `phone_number`, avec `phone_masked` (`+229••••••01`) pour distinguer deux homonymes. |
+| Par numéro complet (« +22991000001 », avec ou sans `+`, espaces acceptés) | Correspondance exacte, `phone_number` renvoyé (celui qui cherche le connaît déjà). |
+| Par morceau de numéro (« 9100 », « +229 ») | Aucun résultat. |
+
+- Un compte inscrit sans nom a son numéro comme nom et pseudo par défaut :
+  ces noms « numériques » ne sont **pas cherchables** (sinon « 9100 »
+  permettait de reconstituer un numéro chiffre par chiffre) et sont masqués
+  dans les réponses.
+- `%` et `_` ne sont plus des jokers SQL ; `limit` plafonné à 50.
+- Les utilisateurs bloqués **dans un sens ou dans l'autre** n'apparaissent plus.
+- **Profil** (`GET /api/users/<id>`) : `phone_number` visible seulement pour
+  soi-même et pour les personnes avec qui on partage une conversation
+  (sinon `null` + `phone_masked`). Les réglages de confidentialité
+  « contacts » (dernière connexion, photo, **bio** — `privacy_about`
+  n'était pas appliqué jusqu'ici) utilisent la même définition. Id invalide → 404.
+- `GET /api/users/by-phone/<numéro>` : numéro complet obligatoire (`400 INVALID_PHONE` sinon).
+- Pour démarrer une conversation depuis une recherche par nom (sans numéro) :
+  `POST /api/conversations/direct` et `POST /<id>/participants` acceptent
+  **`user_id`** (en plus de `phone_number`) ; `POST /api/conversations/group`
+  accepte **`participant_ids`** (en plus de `participants`).
+
+**Fichiers** : [services/users.py](../services/users.py) (masquage, contacts,
+blocages, désignation par id ou numéro), [blueprints/users.py](../blueprints/users.py),
+[blueprints/conversations.py](../blueprints/conversations.py), Swagger.
+
+**Tests** : scénario réel **27/27** (dont la fuite par nom par défaut, trouvée
+et corrigée pendant le test). 
+
+**Limite** : `by-phone` et la recherche par numéro complet permettent toujours
+de vérifier, numéro par numéro, si quelqu'un est inscrit (c'est le principe
+« trouver un contact par son numéro »). Seule une limitation du nombre de
+requêtes (rate limiting) empêcherait de tester des milliers de numéros.
+
+### R2. `/api/echo` et `/api/health` en disaient trop
+
+**Problème.**
+- `POST /api/echo` (public) renvoyait **tous les en-têtes reçus**, dont `Authorization`.
+- `GET /api/health` (public) renvoyait le texte des erreurs de base de données
+  (qui peut contenir l'hôte, l'utilisateur…) et l'occupation du disque.
+- `GET /api/version` affichait la version de Python.
+- `GET /api/admin/stats/messages` renvoyait le texte brut des exceptions.
+
+**Correction.**
+- `/api/echo` : **404 en production** (disponible seulement avec `FLASK_DEBUG=1`,
+  et sans `Authorization` ni `Cookie` dans la réponse).
+- `/api/health` : seulement `up` / `down` par base, **code 503** si une base
+  est injoignable (exploitable par un moniteur). Le détail va dans les logs.
+- `/api/version` : sans version de Python ni fausse date de build.
+- Plus aucun texte d'exception dans les réponses : les erreurs 404 et 500
+  renvoient désormais du JSON générique (`NOT_FOUND`, `INTERNAL_ERROR`).
+
+**Trouvé en testant — MongoDB qui gèle bloquait le serveur.** Par défaut,
+pymongo attend 30 s pour trouver le serveur et **indéfiniment** la réponse
+d'une opération. Si MongoDB gèle (coupure réseau), chaque requête bloque un
+thread du serveur pour toujours. Désormais : 5 s pour trouver le serveur, 5 s
+pour se connecter, 15 s maximum par opération ; `/api/health` utilise une
+connexion dédiée limitée à 3 s (vérifié : réponse `503` en 3,0 s avec
+MongoDB gelé, au lieu de ne jamais répondre).
+
+### R3. Les actions faites par REST n'étaient pas diffusées en temps réel
+
+**Problème.** Un message envoyé par la route REST (secours quand le socket
+est coupé) n'arrivait chez les autres qu'au rechargement de la conversation.
+Idem pour la modification d'un message, les réactions et l'accusé de lecture
+faits par REST.
+
+**Correction.** Ces routes diffusent maintenant le même événement que leur
+équivalent Socket.IO :
+
+| Route REST | Événement diffusé | À qui |
+|------------|-------------------|-------|
+| `POST /api/messages/<conv>/messages` | `new_message` | autres participants |
+| `PUT /api/messages/<conv>/messages/<id>` | `message_edited` | toute la conversation |
+| `POST /api/messages/<conv>/messages/<id>/react` | `reaction_added` | toute la conversation |
+| `DELETE /api/messages/<conv>/messages/<id>/react` | `reaction_removed` | toute la conversation |
+| `POST /api/conversations/<conv>/read` | `message_read` | autres participants |
+| `POST /api/messages/<conv>/messages/<id>/forward` | `new_message` | autres participants de la conversation cible |
+
+L'auteur ne reçoit pas `new_message` / `message_read` pour sa propre action
+(il a déjà la réponse HTTP) : pas de doublon dans l'appli, même comportement
+que par socket. `POST /read` sur une conversation dont on n'est pas membre → 404.
+
+**Fichiers** : [core/realtime.py](../core/realtime.py) (`emit_to_conversation`),
+[blueprints/messages.py](../blueprints/messages.py), [blueprints/conversations.py](../blueprints/conversations.py),
+[blueprints/utils.py](../blueprints/utils.py), [core/database.py](../core/database.py), [app.py](../app.py).
+
+**Tests R2 + R3** : 22 tests unitaires (dont 2 nouveaux) + scénario réel **18/18**.
+
+---
+
 ## Réorganisation du projet
 
 Avant, `app.py` faisait tout (config, pool PostgreSQL, Mongo, JWT, push,
@@ -602,21 +705,15 @@ Le fichier reste ignoré par Git (choix existant dans `.gitignore`).
 
 ## Reste à faire
 
-Non traités volontairement (hors du périmètre 2 à 13) :
+Déjà traités : point 1 (connexion liée à l'appareil, accès PC admin), R1
+(recherche), R2 (echo/health), R3 (diffusion REST), confidentialité
+`privacy_about` et photo « contacts » (avec R1).
 
-1. ~~Point 1 — connexion sans vérification~~ : **traité** (connexion liée à
-   l'appareil, voir plus haut). Reste : la recherche d'utilisateurs expose
-   les numéros de tout le monde avec 2 caractères (vie privée).
-2. `/api/echo` renvoie tous les en-têtes reçus (dont `Authorization`) et
-   `/api/health` expose le texte des erreurs de base de données : à restreindre
-   ou supprimer en production.
-3. Les messages envoyés par la route REST (secours) ne sont pas diffusés en
-   temps réel aux autres participants (seulement la notification push).
-4. « Supprimer » un groupe = le quitter sans les contrôles de `leave` (le dernier
+1. Aucune route d'upload (photo de profil, médias) — cf. PDF d'observations.
+2. « Supprimer » un groupe = le quitter sans les contrôles de `leave` (le dernier
    admin peut partir et laisser le groupe sans admin).
-5. Aucune route d'upload (photo de profil, médias) — cf. PDF d'observations.
-6. Les messages ne contiennent que `sender_id` ; pour les groupes, ajouter le
+3. Les messages ne contiennent que `sender_id` ; pour les groupes, ajouter le
    nom de l'expéditeur simplifierait l'affichage (cf. PDF d'observations).
-7. Confidentialité : `privacy_about` et le réglage « contacts » pour la photo
-   ne sont pas appliqués.
-8. Mettre à jour Flask-SocketIO (5.3.4 → 5.3.6+) pour retrouver un client de test fonctionnel.
+4. Pas de limitation du nombre de requêtes (rate limiting) : protégerait contre
+   le test massif de numéros (`by-phone`) et les abus en général.
+5. Mettre à jour Flask-SocketIO (5.3.4 → 5.3.6+) pour retrouver un client de test fonctionnel.

@@ -110,6 +110,17 @@ def handle_api_error(error):
     return error.to_response()
 
 
+@app.errorhandler(404)
+def handle_not_found(_error):
+    return jsonify({'error': 'Ressource introuvable', 'code': 'NOT_FOUND'}), 404
+
+
+@app.errorhandler(500)
+def handle_internal_error(_error):
+    """Jamais de détail technique dans la réponse : il est dans les logs."""
+    return jsonify({'error': 'Erreur interne du serveur', 'code': 'INTERNAL_ERROR'}), 500
+
+
 @app.route("/", methods=['GET'])
 def welcome():
     return jsonify({"Message": "Bonjour, vous etes sur GBEKOUN !"}), HTTPStatus.OK

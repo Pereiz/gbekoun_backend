@@ -72,6 +72,27 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
 # -------------------------------
 # MongoDB (la connexion réelle est ouverte à la première opération)
 # -------------------------------
-mongo_client = MongoClient(Config.MONGO_URI)
+# Délais bornés : sans eux, une base MongoDB qui gèle (coupure réseau) bloque
+# les threads du serveur indéfiniment (socketTimeoutMS est illimité par défaut).
+mongo_client = MongoClient(
+    Config.MONGO_URI,
+    serverSelectionTimeoutMS=5000,   # serveur introuvable (défaut : 30 s)
+    connectTimeoutMS=5000,           # ouverture de connexion (défaut : 20 s)
+    socketTimeoutMS=15000,           # réponse à une opération (défaut : illimité)
+)
 mongo_db = mongo_client[Config.MONGO_DB]
 messages_col = mongo_db['messages']
+
+
+_health_client = None
+
+
+def mongo_health_client():
+    """Client séparé, très court, pour /api/health : répond en 3 s même si MongoDB gèle."""
+    global _health_client
+    if _health_client is None:
+        _health_client = MongoClient(
+            Config.MONGO_URI, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000,
+            socketTimeoutMS=3000, maxPoolSize=1,
+        )
+    return _health_client

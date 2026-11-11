@@ -1,4 +1,8 @@
 Récupère un utilisateur par ID
+`phone_number` n'est renseigné que pour soi-même et pour les personnes avec qui
+on partage une conversation (sinon null ; `phone_masked` est toujours présent).
+Les réglages de confidentialité « contacts » (dernière connexion, photo, bio)
+s'appliquent aux personnes qui partagent une conversation.
 ---
 tags:
   - Utilisateurs
@@ -15,4 +19,4 @@ responses:
   401:
     description: Non authentifié
   404:
-    description: Utilisateur non trouvé
+    description: USER_NOT_FOUND (inexistant, supprimé, ou blocage entre les deux comptes)

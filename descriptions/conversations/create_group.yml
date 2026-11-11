@@ -23,6 +23,11 @@ parameters:
             type: string
           description: Liste des numéros de téléphone des participants
           example: ["+22990123456", "+22990789012"]
+        participant_ids:
+          type: array
+          items:
+            type: string
+          description: Ids des participants (ex. issus de /api/users/search) ; combinable avec participants
         avatar_url:
           type: string
           description: URL de l'avatar du groupe
