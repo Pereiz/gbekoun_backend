@@ -339,7 +339,7 @@ Si le schéma a changé (nouvelle table, nouvelle colonne) — rejouable sans ri
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < database/postgres/schema.sql
-docker compose -f docker-compose.prod.yml exec -T mongo sh -c 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" /docker-entrypoint-initdb.d/01_init.js'
+docker compose -f docker-compose.prod.yml exec -T mongo sh -c 'mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --eval "$(cat)"' < database/mongo/init.js
 ```
 
 ### Sauvegardes
@@ -380,8 +380,10 @@ même IP chez leur opérateur ; à ajuster dans
 | Variable | Obligatoire | Remarque |
 |----------|:-----------:|----------|
 | `SECRET_KEY`, `JWT_SECRET` | ✅ | valeurs aléatoires (`secrets.token_hex(32)`) |
-| `PG_DATABASE`, `PG_USER`, `PG_PASSWORD` | ✅ | compte PostgreSQL créé au premier démarrage |
-| `MONGO_ROOT_USER`, `MONGO_ROOT_PASSWORD` | ✅ | compte MongoDB créé au premier démarrage |
+| `PG_DATABASE`, `PG_USER`, `PG_PASSWORD` | ✅ | compte **propriétaire** PostgreSQL (schéma, migrations, sauvegardes) |
+| `PG_APP_USER`, `PG_APP_PASSWORD` | ✅ | compte **de l'API**, droits limités aux lignes du schéma `gbekoun` |
+| `MONGO_ROOT_USER`, `MONGO_ROOT_PASSWORD` | ✅ | compte **root** MongoDB (initialisation, sauvegardes) |
+| `MONGO_APP_USER`, `MONGO_APP_PASSWORD` | ✅ | compte **de l'API**, lecture/écriture des messages uniquement |
 | `API_DOMAIN`, `LETSENCRYPT_EMAIL` | ✅ | domaine de l'API, e-mail d'alerte Let's Encrypt |
 | `CORS_ORIGINS` | | domaine(s) de l'interface admin web |
 | `MONGO_DB` | | `gbekoundb_messages` |
@@ -391,7 +393,25 @@ même IP chez leur opérateur ; à ajuster dans
 | `EXPO_ACCESS_TOKEN` | | si l'accès sécurisé aux push Expo est activé |
 
 `FLASK_DEBUG`, `TRUST_PROXY`, `PG_HOST`, `MONGO_URI` et `UPLOAD_FOLDER` sont
-fixés par `docker-compose.prod.yml`.
+fixés par `docker-compose.prod.yml` (l'API y utilise les comptes `*_APP_*`).
+
+### Comptes de base de données
+
+L'API ne se connecte **pas** avec les comptes administrateurs :
+
+| Compte | Utilisé par | Peut |
+|--------|-------------|------|
+| `PG_USER` (propriétaire), `MONGO_ROOT_USER` | schéma, migrations, sauvegardes, restauration | tout |
+| `PG_APP_USER` | l'API | lire/ajouter/modifier/supprimer des lignes du schéma `gbekoun` — pas de `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, ni création de compte |
+| `MONGO_APP_USER` | l'API | lire/ajouter/modifier/supprimer des documents de la collection `messages` — pas de suppression de collection, d'index, de validateur, ni accès aux autres bases |
+
+Ils sont créés **automatiquement au premier démarrage** (volumes vides). Pour
+une base qui existait avant, ou pour changer leurs mots de passe :
+
+```bash
+./deploy/db/create-app-users.sh                 # (docker-compose.dev.yml en argument pour le dev)
+docker compose -f docker-compose.prod.yml up -d api
+```
 
 > La route `POST /api/admin/backup/create` répond `501` dans ce déploiement :
 > les sauvegardes sont faites par le service `backup`.

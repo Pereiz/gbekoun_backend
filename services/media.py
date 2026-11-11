@@ -1,4 +1,4 @@
-"""Stockage des images (photos de profil) sur le disque du serveur.
+"""Stockage des images (photos de profil, avatars de groupe) sur le disque du serveur.
 
 Les fichiers sont écrits dans UPLOAD_FOLDER (volume Docker persistant).
 Chaque image reçue est :
@@ -6,6 +6,10 @@ Chaque image reçue est :
 - recadrée au carré et réduite à 512×512 ;
 - réencodée en JPEG, ce qui supprime les métadonnées (EXIF, position GPS…)
   et tout contenu caché dans le fichier d'origine.
+
+Deux catégories, rangées par propriétaire (utilisateur ou conversation) :
+    /api/media/avatars/<user_id>/<fichier>.jpg
+    /api/media/groups/<conversation_id>/<fichier>.jpg
 """
 import os
 import secrets
@@ -23,12 +27,17 @@ ALLOWED_FORMATS = {'JPEG', 'PNG', 'WEBP', 'GIF'}
 # Protection contre les « bombes » de décompression (petit fichier, image géante).
 Image.MAX_IMAGE_PIXELS = 40_000_000
 
-AVATAR_DIR = 'avatars'
-AVATAR_URL_PREFIX = '/api/media/avatars'
+USER_AVATARS = 'avatars'
+GROUP_AVATARS = 'groups'
+CATEGORIES = (USER_AVATARS, GROUP_AVATARS)
+URL_PREFIX = '/api/media'
+AVATAR_URL_PREFIX = f'{URL_PREFIX}/{USER_AVATARS}'
 
 
-def _avatar_root():
-    return os.path.join(Config.UPLOAD_FOLDER, AVATAR_DIR)
+def _category_root(category):
+    if category not in CATEGORIES:
+        raise ValueError(category)
+    return os.path.join(Config.UPLOAD_FOLDER, category)
 
 
 def _process_image(file_storage):
@@ -62,47 +71,63 @@ def _process_image(file_storage):
     return output.getvalue()
 
 
-def save_avatar(user_id, file_storage):
-    """Enregistre l'avatar et retourne son URL publique relative.
+def save_image(category, owner_id, file_storage):
+    """Enregistre l'image et retourne son URL relative.
 
     Nom de fichier aléatoire : une nouvelle URL à chaque changement (pas de
     cache périmé côté appli) et impossible à deviner.
     """
     content = _process_image(file_storage)
-    user_dir = os.path.join(_avatar_root(), str(user_id))
-    os.makedirs(user_dir, exist_ok=True)
+    owner_dir = os.path.join(_category_root(category), str(owner_id))
+    os.makedirs(owner_dir, exist_ok=True)
     filename = f'{secrets.token_hex(16)}.jpg'
-    temporary = os.path.join(user_dir, f'.{filename}.tmp')
+    temporary = os.path.join(owner_dir, f'.{filename}.tmp')
     with open(temporary, 'wb') as handle:
         handle.write(content)
-    os.replace(temporary, os.path.join(user_dir, filename))  # écriture atomique
-    return f'{AVATAR_URL_PREFIX}/{user_id}/{filename}'
+    os.replace(temporary, os.path.join(owner_dir, filename))  # écriture atomique
+    return f'{URL_PREFIX}/{category}/{owner_id}/{filename}'
 
 
-def avatar_path(user_id, filename):
-    """Chemin disque d'un avatar, ou None si le nom est invalide (pas de ../ possible)."""
+def image_path(category, owner_id, filename):
+    """Chemin disque d'une image, ou None si le nom est invalide (pas de ../ possible)."""
+    if category not in CATEGORIES:
+        return None
     try:
-        user_id = str(uuid.UUID(str(user_id)))
+        owner_id = str(uuid.UUID(str(owner_id)))
     except ValueError:
         return None
     if not filename.endswith('.jpg') or len(filename) != 36 or not all(
         c in '0123456789abcdef' for c in filename[:-4]
     ):
         return None
-    path = os.path.join(_avatar_root(), str(user_id), filename)
+    path = os.path.join(_category_root(category), owner_id, filename)
     return path if os.path.isfile(path) else None
 
 
-def delete_avatar_file(avatar_url):
-    """Supprime le fichier d'un ancien avatar stocké chez nous (ignore les autres URL)."""
-    if not avatar_url or not avatar_url.startswith(AVATAR_URL_PREFIX + '/'):
+def delete_image(url):
+    """Supprime le fichier d'une image stockée chez nous (ignore les autres URL)."""
+    if not url or not url.startswith(URL_PREFIX + '/'):
         return
-    parts = avatar_url[len(AVATAR_URL_PREFIX) + 1:].split('/')
-    if len(parts) != 2:
+    parts = url[len(URL_PREFIX) + 1:].split('/')
+    if len(parts) != 3:
         return
-    path = avatar_path(parts[0], parts[1])
+    path = image_path(*parts)
     if path:
         try:
             os.remove(path)
         except OSError:
             pass
+
+
+# --- Raccourcis pour les photos de profil (noms utilisés ailleurs dans le code) ---
+
+def save_avatar(user_id, file_storage):
+    return save_image(USER_AVATARS, user_id, file_storage)
+
+
+def avatar_path(user_id, filename):
+    return image_path(USER_AVATARS, user_id, filename)
+
+
+def delete_avatar_file(avatar_url):
+    delete_image(avatar_url)

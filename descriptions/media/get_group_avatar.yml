@@ -1,0 +1,21 @@
+Afficher l'avatar d'un groupe
+Réservé aux membres actifs du groupe (404 sinon). Charger l'image avec l'en-tête Authorization.
+---
+tags:
+  - Conversations
+produces:
+  - image/jpeg
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+  - name: filename
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Image JPEG 512×512
+  404:
+    description: NOT_FOUND

@@ -1,0 +1,35 @@
+Changer l'avatar d'un groupe (administrateurs du groupe)
+Envoi en multipart/form-data, champ « file ». Mêmes règles que la photo de profil :
+JPEG, PNG, WebP, GIF ; 2 Mo max ; recadré en 512×512, réencodé en JPEG (EXIF/GPS supprimés).
+Les membres reçoivent l'événement `conversation_updated` (changes.avatar_url).
+---
+tags:
+  - Conversations
+consumes:
+  - multipart/form-data
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+  - name: file
+    in: formData
+    type: file
+    required: true
+responses:
+  200:
+    description: Avatar enregistré
+    schema:
+      type: object
+      properties:
+        avatar_url: {type: string, example: "/api/media/groups/<conversation_id>/<fichier>.jpg"}
+  400:
+    description: FILE_REQUIRED, NOT_A_GROUP
+  403:
+    description: Pas administrateur du groupe
+  404:
+    description: Conversation non trouvée
+  413:
+    description: FILE_TOO_LARGE
+  415:
+    description: UNSUPPORTED_IMAGE ou INVALID_IMAGE

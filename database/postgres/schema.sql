@@ -243,6 +243,15 @@ CREATE INDEX IF NOT EXISTS idx_approval_requests_user
     ON gbekoun.device_approval_requests(user_id, created_at DESC);
 
 -- -------------------------------------------------------------
+-- Nettoyage : les avatars ne peuvent plus être des URL externes
+-- (anciennes données, avant l'upload). Rejouable sans effet de bord.
+-- -------------------------------------------------------------
+UPDATE gbekoun.users SET avatar_url = NULL
+WHERE avatar_url IS NOT NULL AND avatar_url NOT LIKE '/api/media/avatars/%';
+UPDATE gbekoun.conversations SET avatar_url = NULL
+WHERE avatar_url IS NOT NULL AND avatar_url NOT LIKE '/api/media/groups/%';
+
+-- -------------------------------------------------------------
 -- Index
 -- -------------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_users_is_online           ON gbekoun.users(is_online);

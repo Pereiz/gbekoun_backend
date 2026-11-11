@@ -8,6 +8,7 @@ from core.database import execute_query, messages_col, transaction
 from core.realtime import emit_to_conversation, join_users_to_conversation
 from core.security import require_auth
 from services.groups import announce_departures, leave_conversation
+from services.media import GROUP_AVATARS, delete_image, save_image
 from services.messaging import attach_senders
 from services.users import resolve_user_id
 from utils.message_helpers import serialize_message_value
@@ -147,7 +148,9 @@ def create_group():
     participants_phones = data.get('participants', [])
     # Membres désignés par numéro (`participants`) et/ou par id (`participant_ids`).
     participant_user_ids = data.get('participant_ids', [])
-    avatar_url = data.get('avatar_url')
+    if data.get('avatar_url'):
+        # Plus d'URL libre : l'avatar passe par POST /api/conversations/<id>/avatar.
+        return _avatar_use_upload()
 
     if not name:
         return jsonify({'error': 'Nom du groupe requis'}), 400
@@ -177,7 +180,7 @@ def create_group():
         cur.execute("""
             INSERT INTO gbekoun.conversations (id, type, name, avatar_url, created_by)
             VALUES (%s, 'group', %s, %s, %s)
-        """, (conversation_id, name, avatar_url, g.current_user_id))
+        """, (conversation_id, name, None, g.current_user_id))
 
         # Le créateur est administrateur du groupe.
         # clock_timestamp() (et non NOW(), identique pour toute la transaction) :
@@ -257,8 +260,9 @@ def update_group(conversation_id):
         params.append(data['name'])
     
     if 'avatar_url' in data:
-        updates.append("avatar_url = %s")
-        params.append(data['avatar_url'])
+        # Avant : n'importe quelle URL (un lien externe pouvait servir à savoir
+        # qui affiche le groupe). L'avatar passe désormais par l'upload.
+        return _avatar_use_upload()
     
     if not updates:
         return jsonify({'error': 'Rien à mettre à jour'}), 400
@@ -274,8 +278,76 @@ def update_group(conversation_id):
     """)
     
     updated = execute_query(query, tuple(params), fetch_one=True)
-    
+    emit_to_conversation('conversation_updated', {
+        'conversation_id': conversation_id, 'changes': {'name': updated['name']},
+    }, conversation_id)
     return jsonify(updated), 200
+
+
+def _avatar_use_upload():
+    return jsonify({
+        'error': 'Utilisez POST /api/conversations/<id>/avatar pour changer l\'avatar du groupe.',
+        'code': 'AVATAR_USE_UPLOAD',
+    }), 400
+
+
+def _group_admin_error(conversation_id):
+    """Réponse d'erreur si l'utilisateur n'est pas admin de ce groupe, sinon None."""
+    row = execute_query("""
+        SELECT cp.is_admin, c.type
+        FROM gbekoun.conversation_participants cp
+        JOIN gbekoun.conversations c ON c.id = cp.conversation_id
+        WHERE cp.conversation_id::text = %s AND cp.user_id = %s AND cp.deleted_at IS NULL
+    """, (conversation_id, g.current_user_id), fetch_one=True)
+    if not row:
+        return jsonify({'error': 'Conversation non trouvée'}), 404
+    if row['type'] != 'group':
+        return jsonify({'error': 'Seuls les groupes ont un avatar', 'code': 'NOT_A_GROUP'}), 400
+    if not row['is_admin']:
+        return jsonify({'error': 'Seul un administrateur peut modifier le groupe'}), 403
+    return None
+
+
+def _replace_group_avatar(conversation_id, new_url):
+    previous = execute_query("""
+        UPDATE gbekoun.conversations c SET avatar_url = %s, updated_at = NOW()
+        FROM (SELECT avatar_url FROM gbekoun.conversations WHERE id = %s) old
+        WHERE c.id = %s
+        RETURNING old.avatar_url AS previous_url
+    """, (new_url, conversation_id, conversation_id), fetch_one=True)
+    delete_image(previous and previous['previous_url'])
+    emit_to_conversation('conversation_updated', {
+        'conversation_id': conversation_id, 'changes': {'avatar_url': new_url},
+    }, conversation_id)
+
+
+@conversations_bp.route('/<conversation_id>/avatar', methods=['POST'])
+@require_auth
+@swag_from('../descriptions/conversations/upload_avatar.yml')
+def upload_group_avatar(conversation_id):
+    """Avatar du groupe : multipart/form-data, champ « file » (admin du groupe)."""
+    error = _group_admin_error(conversation_id)
+    if error:
+        return error
+    file = request.files.get('file')
+    if file is None:
+        return jsonify({'error': 'Fichier image requis (champ « file »)', 'code': 'FILE_REQUIRED'}), 400
+
+    avatar_url = save_image(GROUP_AVATARS, conversation_id, file)
+    _replace_group_avatar(conversation_id, avatar_url)
+    return jsonify({'avatar_url': avatar_url}), 200
+
+
+@conversations_bp.route('/<conversation_id>/avatar', methods=['DELETE'])
+@require_auth
+@swag_from('../descriptions/conversations/delete_avatar.yml')
+def delete_group_avatar(conversation_id):
+    """Retire l'avatar du groupe (admin du groupe)."""
+    error = _group_admin_error(conversation_id)
+    if error:
+        return error
+    _replace_group_avatar(conversation_id, None)
+    return jsonify({'avatar_url': None}), 200
 
 
 @conversations_bp.route('/<conversation_id>', methods=['DELETE'])

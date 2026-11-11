@@ -1,4 +1,5 @@
 Crée un groupe
+L'avatar ne se définit plus ici (400 AVATAR_USE_UPLOAD) : POST /api/conversations/{id}/avatar.
 ---
 tags:
   - Conversations
@@ -28,9 +29,6 @@ parameters:
           items:
             type: string
           description: Ids des participants (ex. issus de /api/users/search) ; combinable avec participants
-        avatar_url:
-          type: string
-          description: URL de l'avatar du groupe
 responses:
   201:
     description: Groupe créé

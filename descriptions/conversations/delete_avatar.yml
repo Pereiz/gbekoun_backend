@@ -1,0 +1,14 @@
+Retirer l'avatar d'un groupe (administrateurs du groupe)
+---
+tags:
+  - Conversations
+parameters:
+  - name: conversation_id
+    in: path
+    type: string
+    required: true
+responses:
+  200:
+    description: Avatar retiré
+  403:
+    description: Pas administrateur du groupe

@@ -23,7 +23,11 @@ services:
       # Dans le réseau Docker, les bases sont joignables par leur nom de service.
       PG_HOST: postgres
       PG_PORT: "5432"
-      MONGO_URI: mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017/${MONGO_DB:-gbekoundb_messages}?authSource=admin
+      # Comptes à droits limités (voir database/postgres/app_user.sql et database/mongo/init.js) :
+      # l'API ne peut ni modifier le schéma ni toucher aux autres bases.
+      PG_USER: ${PG_APP_USER:?PG_APP_USER requis}
+      PG_PASSWORD: ${PG_APP_PASSWORD:?PG_APP_PASSWORD requis}
+      MONGO_URI: mongodb://${MONGO_APP_USER:?MONGO_APP_USER requis}:${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD requis}@mongo:27017/${MONGO_DB:-gbekoundb_messages}?authSource=${MONGO_DB:-gbekoundb_messages}
       UPLOAD_FOLDER: /app/uploads
     # Serveur de développement avec rechargement automatique du code.
     command: python app.py
@@ -46,11 +50,15 @@ services:
       POSTGRES_DB: ${PG_DATABASE}
       POSTGRES_USER: ${PG_USER}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
+      PG_APP_USER: ${PG_APP_USER}
+      PG_APP_PASSWORD: ${PG_APP_PASSWORD}
     ports:
-      - "5435:5432"
+      - "${PG_HOST_PORT:-5435}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/postgres/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./database/postgres/02_app_user.sh:/docker-entrypoint-initdb.d/02_app_user.sh:ro
+      - ./database/postgres/app_user.sql:/opt/gbekoun/app_user.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d ${PG_DATABASE}"]
       interval: 5s
@@ -65,8 +73,10 @@ services:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
       MONGO_INITDB_DATABASE: ${MONGO_DB:-gbekoundb_messages}
+      MONGO_APP_USER: ${MONGO_APP_USER}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD}
     ports:
-      - "27020:27017"
+      - "${MONGO_HOST_PORT:-27020}:27017"
     volumes:
       - mongo_data:/data/db
       - ./database/mongo/init.js:/docker-entrypoint-initdb.d/01_init.js:ro

@@ -705,6 +705,61 @@ serveur de **développement** (`python app.py`), la fermeture d'une connexion
 WebSocket affiche `write() before start_response` dans les logs — message
 connu et sans conséquence, absent avec Gunicorn.
 
+### R10. Avatar de groupe : plus d'URL externe
+
+**Problème.** `PUT /api/conversations/<id>` (et la création de groupe)
+acceptaient n'importe quelle URL comme avatar de groupe : un lien externe
+permettait de savoir qui affiche le groupe (même problème que l'ancien avatar
+de profil, corrigé en R4).
+
+**Correction.**
+- `POST /api/conversations/<id>/avatar` (multipart, champ `file`) et
+  `DELETE …/avatar`, réservés aux **admins du groupe** ; mêmes règles que la
+  photo de profil (2 Mo, 512×512, réencodage JPEG, EXIF/GPS supprimés).
+- Affichage `GET /api/media/groups/<conversation_id>/<fichier>.jpg` :
+  **membres actifs du groupe uniquement**, seule l'image actuelle est servie.
+- `avatar_url` refusé dans `PUT /<id>` et à la création (`400 AVATAR_USE_UPLOAD`).
+- Événement `conversation_updated` (`changes.avatar_url` ou `changes.name`).
+- Le schéma efface les anciens avatars (profil et groupe) qui pointaient vers
+  des URL externes (`schema.sql`, rejouable).
+- `services/media.py` est devenu générique (profils et groupes).
+
+### R11. L'API utilisait les comptes administrateurs des bases
+
+**Problème.** L'API se connectait à PostgreSQL avec le propriétaire de la base
+et à MongoDB avec le compte root : une faille dans l'API (injection, fuite du
+`.env` du conteneur…) donnait tous les droits (supprimer les tables, lire
+les autres bases, créer des comptes).
+
+**Correction.** Deux comptes dédiés, utilisés **uniquement** par l'API :
+
+| Compte | Autorisé | Refusé (vérifié) |
+|--------|----------|------------------|
+| PostgreSQL `gbekoun_app` ([database/postgres/app_user.sql](../database/postgres/app_user.sql)) | `SELECT`, `INSERT`, `UPDATE`, `DELETE` sur les tables du schéma `gbekoun` (y compris les futures) | `DROP TABLE`, `ALTER TABLE`, `CREATE TABLE`, `TRUNCATE`, `CREATE ROLE`, devenir superutilisateur, lire `pg_authid` |
+| MongoDB `gbekoun_app`, rôle sur mesure `gbekounApp` ([database/mongo/init.js](../database/mongo/init.js)) | lire/ajouter/modifier/supprimer des documents de `messages` | supprimer la collection, créer une collection, écrire ailleurs, supprimer un index, modifier le validateur, `dropDatabase`, lire une autre base, créer un utilisateur |
+
+- Création **automatique au premier démarrage** (`02_app_user.sh`, `init.js`) ;
+  pour une base existante : `deploy/db/create-app-users.sh` (rejouable).
+- Les comptes administrateurs restent réservés au schéma, aux migrations, aux
+  sauvegardes et aux restaurations (service `backup`).
+- Nouvelles variables : `PG_APP_USER`, `PG_APP_PASSWORD`, `MONGO_APP_USER`,
+  `MONGO_APP_PASSWORD` (obligatoires dans les deux fichiers compose).
+
+**Trouvé en testant.**
+- Le rôle standard MongoDB `readWrite` permet de **supprimer la collection
+  entière des messages** : vérifié à mes dépens, la commande de test l'a
+  réellement supprimée dans la pile de test (réparée ensuite). D'où le rôle
+  sur mesure, limité à la collection `messages`.
+- Un fichier monté seul dans un conteneur garde son **ancienne version**
+  après modification ou `git pull` : le script et la commande documentée
+  envoient désormais les scripts depuis le dépôt.
+
+**Tests R10 + R11** : base existante mise à niveau avec le script (deux
+passages), droits vérifiés un par un (tableau ci-dessus), scénario complet
+de production rejoué avec les comptes limités (y compris sauvegarde et
+**restauration**) + avatar de groupe **9/9** ; installation neuve : comptes
+créés automatiquement et API opérationnelle.
+
 ---
 
 ## Réorganisation du projet
@@ -878,16 +933,8 @@ Le fichier reste ignoré par Git (choix existant dans `.gitignore`).
 
 ## Reste à faire
 
-Déjà traités : point 1 (connexion liée à l'appareil, accès PC admin), R1 à
-R9 (recherche, echo/health, diffusion REST, photo de profil, Docker dev/prod,
-texte uniquement, succession des admins, nom de l'expéditeur, Flask-SocketIO).
+Déjà traités : point 1 (connexion liée à l'appareil, accès PC admin) et R1 à
+R11.
 
 1. **Médias du chat** (images, vidéos, vocaux, documents) : volontairement
    reportés (R6). À concevoir le jour où ils seront nécessaires.
-2. L'avatar d'un **groupe** (`PUT /api/conversations/<id>`, champ `avatar_url`)
-   accepte encore n'importe quelle URL externe (même problème que l'ancien
-   avatar de profil, corrigé en R4) : à remplacer par un upload ou à retirer.
-3. L'appli se connecte à MongoDB et PostgreSQL avec les comptes
-   administrateurs des conteneurs : créer des comptes dédiés à droits
-   limités (lecture/écriture sur la seule base de l'appli) réduirait l'impact
-   d'une faille.

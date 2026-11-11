@@ -63,4 +63,35 @@ target.messages.createIndex({ reply_to_id: 1 }, { name: 'idx_reply_to' });
 // messages de plus d'un an (idx_ttl_timestamp). Il n'est volontairement plus
 // créé ici. Voir docs/CORRECTIONS.md pour le retirer d'une base existante.
 
+// Compte de l'application à droits limités, sur CETTE base uniquement.
+// Rôle sur mesure plutôt que « readWrite » : readWrite permet aussi de
+// supprimer une collection entière (dropCollection) ou de modifier son
+// validateur. L'API n'a besoin que de lire/ajouter/modifier/supprimer des
+// documents. Le compte root reste réservé à l'initialisation et aux sauvegardes.
+const appUser = typeof process !== 'undefined' ? process.env.MONGO_APP_USER : undefined;
+const appPassword = typeof process !== 'undefined' ? process.env.MONGO_APP_PASSWORD : undefined;
+if (appUser && appPassword) {
+    const roleName = 'gbekounApp';
+    // Uniquement la collection « messages » (la seule utilisée par l'API) :
+    // pas de création d'autres collections.
+    const privileges = [{
+        resource: { db: dbName, collection: 'messages' },
+        actions: ['find', 'insert', 'update', 'remove'],
+    }];
+    if (target.getRole(roleName)) {
+        target.updateRole(roleName, { privileges, roles: [] });
+    } else {
+        target.createRole({ role: roleName, privileges, roles: [] });
+    }
+    const roles = [{ role: roleName, db: dbName }];
+    if (target.getUser(appUser)) {
+        target.updateUser(appUser, { pwd: appPassword, roles });
+    } else {
+        target.createUser({ user: appUser, pwd: appPassword, roles });
+    }
+    print(`Compte applicatif ${appUser} prêt (lecture/écriture de documents sur ${dbName} uniquement).`);
+} else {
+    print('MONGO_APP_USER / MONGO_APP_PASSWORD absents : compte applicatif non créé.');
+}
+
 print(`MongoDB initialisée : base ${dbName}, collections : ${target.getCollectionNames().join(', ')}`);

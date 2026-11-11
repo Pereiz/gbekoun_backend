@@ -1,5 +1,5 @@
 # blueprints/media.py
-"""Lecture des fichiers stockés par le serveur (photos de profil).
+"""Lecture des fichiers stockés par le serveur (photos de profil, avatars de groupe).
 
 Authentification requise : l'appli doit envoyer l'en-tête Authorization en
 chargeant l'image (ex. expo-image : source={{ uri, headers: { Authorization } }}).
@@ -11,7 +11,7 @@ from flasgger import swag_from
 from core.database import execute_query
 from core.http import error_response
 from core.security import require_auth
-from services.media import AVATAR_URL_PREFIX, avatar_path
+from services.media import AVATAR_URL_PREFIX, GROUP_AVATARS, URL_PREFIX, avatar_path, image_path
 from services.users import are_contacts, is_blocked_between
 
 media_bp = Blueprint('media', __name__, url_prefix='/api/media')
@@ -46,5 +46,30 @@ def get_avatar(user_id, filename):
 
     response = send_file(path, mimetype='image/jpeg', conditional=True, max_age=86400)
     # Le nom change à chaque nouvelle photo : cache possible, mais privé (contenu soumis à autorisation).
+    response.headers['Cache-Control'] = 'private, max-age=86400'
+    return response
+
+
+@media_bp.route('/groups/<conversation_id>/<filename>', methods=['GET'])
+@require_auth
+@swag_from('../descriptions/media/get_group_avatar.yml')
+def get_group_avatar(conversation_id, filename):
+    """Avatar de groupe : visible uniquement par les membres actifs du groupe."""
+    path = image_path(GROUP_AVATARS, conversation_id, filename)
+    if not path:
+        return _not_found()
+
+    group = execute_query("""
+        SELECT c.avatar_url
+        FROM gbekoun.conversations c
+        JOIN gbekoun.conversation_participants cp ON cp.conversation_id = c.id
+        WHERE c.id = %s AND c.type = 'group'
+          AND cp.user_id = %s AND cp.deleted_at IS NULL
+    """, (conversation_id, g.current_user_id), fetch_one=True)
+    # Seul l'avatar ACTUEL est servi, et seulement aux membres.
+    if not group or group['avatar_url'] != f'{URL_PREFIX}/{GROUP_AVATARS}/{conversation_id}/{filename}':
+        return _not_found()
+
+    response = send_file(path, mimetype='image/jpeg', conditional=True, max_age=86400)
     response.headers['Cache-Control'] = 'private, max-age=86400'
     return response
